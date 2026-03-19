@@ -372,8 +372,7 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
         action = route_fn(row, col, cube_done, blocked_set)
         if action is not None:
             nr, nc, _, safe = is_move_safe(row, col, action, coily)
-            # Also reject moves adjacent to Coily (timing-unsafe on fast levels)
-            if safe and not (coily and coily_can_reach(coily, (nr, nc))):
+            if safe:
                 return action
 
     # Last resort: any safe move maximizing distance from Coily
