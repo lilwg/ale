@@ -359,8 +359,11 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
                 if level >= 3 and cube_done[nr][nc]:
                     cube_val = -8
 
-                # Avoid dead ends: heavy penalty for corners/bottom with few escapes
+                # Avoid dead ends and bottom row when enemies present
                 dead_end_penalty = -15 if esc == 0 else (-8 if esc == 1 else 0)
+                # Row 5 is a trap — very few escape routes, enemies approach from above
+                if nr == MAX_ROW and (state.enemies or coily):
+                    dead_end_penalty -= 12
 
                 # Disc proximity bonus when luring
                 disc_bonus = 0
