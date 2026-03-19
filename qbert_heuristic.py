@@ -263,8 +263,14 @@ def bfs_peel_route(row, col, cube_done, blocked=set()):
 def pick_action(row, col, cube_done, state, discs_available, level=1):
     coily = state.coily
 
-    # Danger zone: Coily + neighbors (green enemies are harmless — ignore them)
+    # Danger zone: all enemies from RAM + their neighbors
+    # (RAM detection catches red balls, Coily, and other lethal enemies)
     danger = set()
+    for epos in state.enemies:
+        danger.add(epos)
+        for _, nr, nc in neighbors(epos[0], epos[1]):
+            danger.add((nr, nc))
+    # Ensure Coily (pixel-detected, most reliable) is always in danger
     if coily:
         danger.add(coily)
         for _, nr, nc in neighbors(coily[0], coily[1]):

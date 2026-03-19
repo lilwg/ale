@@ -27,6 +27,12 @@ NUM_CUBES = 21
 QBERT_Y_ADDR = 67   # Q*bert's Y pixel position
 QBERT_X_ADDR = 43   # Q*bert's X pixel position
 
+# Entity position addresses: slot 0 = Q*bert, slots 1-5 = enemies
+# X positions: RAM[43..48], Y positions: RAM[67..72]
+ENTITY_X_ADDRS = [43, 44, 45, 46, 47, 48]
+ENTITY_Y_ADDRS = [67, 68, 69, 70, 71, 72]
+NUM_ENTITY_SLOTS = 6
+
 # RAM addresses for cube colors, indexed by (row, col)
 # Verified: (1,0)→52, (2,1)→85, (4,1)→3, (5,1)→34
 CUBE_RAM = {
@@ -104,13 +110,14 @@ def find_sprite(frame, color, tol=40, min_pixels=3):
 
 class QbertState:
     """Snapshot of the game state."""
-    __slots__ = ['qbert', 'coily', 'green', 'red_ball', 'lives', 'reward', 'done']
+    __slots__ = ['qbert', 'coily', 'green', 'red_ball', 'enemies', 'lives', 'reward', 'done']
 
     def __init__(self):
         self.qbert = None    # (row, col) or None
         self.coily = None    # (row, col) or None
         self.green = None    # (row, col) or None
         self.red_ball = None # (row, col) or None
+        self.enemies = []    # list of (row, col) for all detected enemies on the grid
         self.lives = 0
         self.reward = 0.0
         self.done = False
@@ -119,8 +126,8 @@ class QbertState:
         parts = [f"Q={self.qbert}"]
         if self.coily:
             parts.append(f"C={self.coily}")
-        if self.green:
-            parts.append(f"G={self.green}")
+        if self.enemies:
+            parts.append(f"E={self.enemies}")
         parts.append(f"lives={self.lives}")
         return f"State({', '.join(parts)})"
 
@@ -134,40 +141,36 @@ class QbertStateReader:
         self._prev_x = None
         self._stable_count = 0
         self._cube_initial_color = None
+        self._cube_start_values = None  # per-cube baseline at level start
         self._level = 1
 
     # Known level color cycle (verified empirically, repeats every 4 levels)
     LEVEL_COLORS = {1: 148, 2: 26, 3: 10, 4: 152}
 
     def set_level(self, level):
-        """Set the current level and detect the initial cube color."""
+        """Set the current level and snapshot cube baseline for change detection."""
         self._level = level
         # Use known color cycle (period 4)
         cycle_pos = ((level - 1) % 4) + 1
         self._cube_initial_color = self.LEVEL_COLORS[cycle_pos]
-
-    def detect_cube_initial_color(self):
-        """Read the initial cube color at level start via majority vote.
-        At level start, at most 1 cube (0,0) is colored, so the most common
-        value among all 21 cubes is the initial color."""
+        # Snapshot current cube values as the baseline for this level.
+        # A cube is "done" when its value CHANGES from this baseline.
+        # This handles carry-over from previous levels correctly.
         ram = self.env.unwrapped.ale.getRAM()
-        values = [int(ram[addr]) for addr in CUBE_RAM.values()]
-        detected = max(set(values), key=values.count)
-        # Validate against known cycle
-        cycle_pos = ((self._level - 1) % 4) + 1
-        expected = self.LEVEL_COLORS[cycle_pos]
-        # Trust the cycle if detection disagrees (stale cube data)
-        self._cube_initial_color = expected if detected != expected else detected
+        self._cube_start_values = {(r, c): int(ram[addr])
+                                    for (r, c), addr in CUBE_RAM.items()}
 
-    def wait_for_level_start(self, max_frames=180):
-        """Wait for level transition: skip animation until Q*bert appears at (0,0).
+    def wait_for_level_start(self, max_frames=200):
+        """Wait for level transition: skip animation until Q*bert lands at (0,0).
+        Uses a two-phase approach: first wait for Q*bert to leave (0,0) during
+        celebration, then wait for Q*bert to return to (0,0) for the new level.
         Returns (obs, total_reward, done, info)."""
         total_r = 0
         obs = None
         info = {}
         done = False
-        # Wait until Q*bert is detected at (0,0), indicating the new level started
-        found_top = False
+        left_top = False
+        found_top = 0
         for _ in range(max_frames):
             obs, r, t, tr, info = self.env.step(0)
             total_r += r
@@ -175,32 +178,36 @@ class QbertStateReader:
                 done = True
                 break
             pos = self.read_qbert_position()
-            if pos == (0, 0):
-                if found_top:
-                    break  # Stable at (0,0) for 2 frames
-                found_top = True
-            else:
-                found_top = False
+            if pos != (0, 0):
+                left_top = True
+                found_top = 0
+            elif left_top:
+                found_top += 1
+                if found_top >= 3:
+                    break  # Q*bert left and returned to (0,0) — new level
         return obs, total_r, done, info
 
     def read_cube_done(self):
-        """Read cube done/not-done state directly from RAM. No manual tracking needed."""
+        """Read cube done/not-done state from RAM using per-cube baseline.
+        A cube is 'done' when its value CHANGES from the level-start baseline.
+        This handles carry-over from previous levels correctly."""
         ram = self.env.unwrapped.ale.getRAM()
-        init = self._cube_initial_color
         cube_done = [[False] * (r + 1) for r in range(MAX_ROW + 1)]
-        if init is None:
+        baseline = self._cube_start_values
+        if baseline is None:
             return cube_done
         for (r, c), addr in CUBE_RAM.items():
-            cube_done[r][c] = (int(ram[addr]) != init)
+            cube_done[r][c] = (int(ram[addr]) != baseline[(r, c)])
         return cube_done
 
     def count_done_cubes(self):
-        """Count completed cubes from RAM."""
+        """Count completed cubes from RAM using per-cube baseline."""
         ram = self.env.unwrapped.ale.getRAM()
-        init = self._cube_initial_color
-        if init is None:
+        baseline = self._cube_start_values
+        if baseline is None:
             return 0
-        return sum(1 for addr in CUBE_RAM.values() if int(ram[addr]) != init)
+        return sum(1 for (r, c), addr in CUBE_RAM.items()
+                   if int(ram[addr]) != baseline[(r, c)])
 
     def read_qbert_position(self):
         """Read Q*bert's grid position directly from RAM. Instant."""
@@ -208,6 +215,20 @@ class QbertStateReader:
         y = int(ram[QBERT_Y_ADDR])
         x = int(ram[QBERT_X_ADDR])
         return ram_to_grid(y, x)
+
+    def read_enemies_ram(self):
+        """Read ALL enemy positions from RAM (slots 1-5, slot 0 is Q*bert).
+        Returns list of (row, col) for each enemy on a valid grid position."""
+        ram = self.env.unwrapped.ale.getRAM()
+        qbert_pos = self.read_qbert_position()
+        enemies = []
+        for slot in range(1, NUM_ENTITY_SLOTS):
+            y = int(ram[ENTITY_Y_ADDRS[slot]])
+            x = int(ram[ENTITY_X_ADDRS[slot]])
+            pos = ram_to_grid(y, x)
+            if pos is not None and pos != qbert_pos:
+                enemies.append(pos)
+        return enemies
 
     def read_enemies(self, frame):
         """Read enemy positions from pixels. Returns (coily, green, red_ball)."""
@@ -224,6 +245,7 @@ class QbertStateReader:
         state = QbertState()
         state.qbert = self.read_qbert_position()
         state.coily, state.green, state.red_ball = self.read_enemies(obs)
+        state.enemies = self.read_enemies_ram()
         state.lives = info.get('lives', 0)
         state.reward = reward
         state.done = done
