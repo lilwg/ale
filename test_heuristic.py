@@ -120,13 +120,10 @@ for episode in range(1, MAX_EPISODES + 1):
             jump_count = 0
             prev_lives = state.lives
             discs_available = set(DISCS.keys())
+            reader.set_level(level)
             if not done:
                 obs, extra_r, done, info = reader.wait_for_level_start()
                 total_reward += extra_r
-                if not done:
-                    obs, extra_r, done, info = reader.wait_for_landing(40)
-                    total_reward += extra_r
-            reader.set_level(level)
             state = reader.read_state(obs, info) if not done else state
             if not done and state.lives < prev_lives:
                 prev_lives = state.lives

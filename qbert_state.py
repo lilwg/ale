@@ -160,31 +160,61 @@ class QbertStateReader:
         self._cube_start_values = {(r, c): int(ram[addr])
                                     for (r, c), addr in CUBE_RAM.items()}
 
-    def wait_for_level_start(self, max_frames=150):
-        """Wait for level transition until Q*bert returns to (0,0) for new level.
-        Two-phase: wait for Q*bert to leave (0,0) during celebration,
-        then wait for return. Kept short to avoid enemy deaths during wait.
+    def wait_for_level_start(self, first_action=5, max_frames=300):
+        """Two-phase level start with immediate first move.
+        Phase 1: Send first_action each frame, wait for Q*bert to stabilize at (0,0)
+                 (celebration animation over). Q*bert won't actually move during celebration.
+        Phase 2: Keep sending first_action. When Q*bert leaves (0,0), the level started.
+                 Capture cube baseline from the last stable (0,0) frame.
+        first_action=5 is DOWN (0,0)->(1,0), always valid from start position.
         Returns (obs, total_reward, done, info)."""
         total_r = 0
         obs = None
         info = {}
         done = False
+        # Phase 1: wait for Q*bert to settle at (0,0) — celebration ending
+        at_top_count = 0
         left_top = False
-        found_top = 0
+        baseline_snapshot = None
         for _ in range(max_frames):
-            obs, r, t, tr, info = self.env.step(0)
+            obs, r, t, tr, info = self.env.step(first_action)
             total_r += r
             if t or tr:
                 done = True
                 break
             pos = self.read_qbert_position()
-            if pos != (0, 0):
+            if pos == (0, 0):
+                at_top_count += 1
+                if not left_top and at_top_count < 3:
+                    continue  # Still at initial (0,0), wait to leave first
+                if left_top and at_top_count >= 3:
+                    # Q*bert returned to (0,0) and is stable — celebration over
+                    # Now snapshot baseline and wait for the first move to work
+                    ram = self.env.unwrapped.ale.getRAM()
+                    baseline_snapshot = {(r, c): int(ram[addr])
+                                         for (r, c), addr in CUBE_RAM.items()}
+                    # Phase 2: keep sending action until Q*bert moves
+                    for _ in range(60):
+                        ram = self.env.unwrapped.ale.getRAM()
+                        baseline_snapshot = {(r, c): int(ram[addr])
+                                             for (r, c), addr in CUBE_RAM.items()}
+                        obs, r, t, tr, info = self.env.step(first_action)
+                        total_r += r
+                        if t or tr:
+                            done = True
+                            break
+                        pos2 = self.read_qbert_position()
+                        if pos2 is not None and pos2 != (0, 0):
+                            self._cube_start_values = baseline_snapshot
+                            break
+                    break
+            else:
                 left_top = True
-                found_top = 0
-            elif left_top:
-                found_top += 1
-                if found_top >= 2:
-                    break  # Q*bert returned to (0,0) — new level started
+                at_top_count = 0
+        # Let Q*bert finish landing
+        if not done:
+            obs, r, done, info = self.wait_for_landing(15)
+            total_r += r
         return obs, total_r, done, info
 
     def read_cube_done(self):

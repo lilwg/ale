@@ -528,14 +528,11 @@ def run():
                 jump_count = 0
                 prev_lives = state.lives
                 discs_available = set(DISCS.keys())
+                reader.set_level(level)  # sets color cycle
                 if not done:
+                    # Spam first move until level starts — baseline captured inside
                     obs, extra_r, done, info = reader.wait_for_level_start()
                     total_reward += extra_r
-                    if not done:
-                        obs, extra_r, done, info = reader.wait_for_landing(40)
-                        total_reward += extra_r
-                # Use known color cycle for reliable initial color detection
-                reader.set_level(level)
                 state = reader.read_state(obs, info) if not done else state
                 # Handle death during level transition
                 if not done and state.lives < prev_lives:
