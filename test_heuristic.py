@@ -1,4 +1,7 @@
-"""Run heuristic agent headlessly and log detailed state for debugging."""
+"""Run heuristic agent and log detailed state for debugging.
+Use --visual to match the rendered game's frame timing (rgb_array mode).
+"""
+import sys
 import gymnasium as gym
 import ale_py
 import numpy as np
@@ -8,10 +11,12 @@ gym.register_envs(ale_py)
 from qbert_state import QbertStateReader, is_valid, MAX_ROW, NUM_CUBES, CUBE_RAM
 from qbert_heuristic import pick_action, MOVES, DISCS, NOOP, DOWN, PEEL_LAYERS, grid_distance
 
-env = gym.make("ALE/Qbert-v5", render_mode=None, repeat_action_probability=0.0)
+# Use rgb_array mode by default to match visual game timing
+render_mode = "rgb_array" if "--visual" not in sys.argv else "human"
+env = gym.make("ALE/Qbert-v5", render_mode=render_mode, repeat_action_probability=0.0)
 reader = QbertStateReader(env)
 
-MAX_EPISODES = 3
+MAX_EPISODES = 1
 
 for episode in range(1, MAX_EPISODES + 1):
     obs, info = env.reset()

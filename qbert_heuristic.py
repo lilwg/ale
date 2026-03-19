@@ -512,6 +512,13 @@ def run():
                     for alt_action, _, _ in neighbors(row, col):
                         action = alt_action
                         break
+                # Extra safety: if moving DOWN from row 4+ and position wasn't
+                # verified by RAM, don't risk it (could actually be at row 5)
+                elif action in (DOWN, RIGHT) and nr >= MAX_ROW and not actual_pos:
+                    for alt_action, anr, _ in neighbors(row, col):
+                        if anr < row:  # prefer moving UP
+                            action = alt_action
+                            break
             move_name = MOVES.get(action, (0, 0, "disc"))[2] if action in MOVES else "disc"
 
             obs, r, t, tr, info = env.step(action)
