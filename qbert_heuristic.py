@@ -480,6 +480,15 @@ def run():
             orig_step = env.step
             if speed > 1:
                 env.step = _orig_step  # bypass cv2 rendering
+            else:
+                # In human mode, swap to a non-rendering env for skip
+                skip_env = gym.make("ALE/Qbert-v5", render_mode=None, repeat_action_probability=0.0)
+                # Copy the game state
+                state_ref = env.unwrapped.ale.cloneState()
+                skip_env.reset()
+                skip_env.unwrapped.ale.restoreState(state_ref)
+                env.step = skip_env.step
+                reader.env = skip_env
             while level < start_level and not done:
                 cube_done = reader.read_cube_done()
                 cubes_colored = reader.count_done_cubes()
@@ -542,6 +551,12 @@ def run():
                     prev_cubes_colored = reader.count_done_cubes()
                     jump_count = 0
             env.step = orig_step  # restore rendering
+            if speed <= 1:
+                # Copy game state back to the rendering env
+                state_ref = skip_env.unwrapped.ale.cloneState()
+                env.unwrapped.ale.restoreState(state_ref)
+                skip_env.close()
+                reader.env = env
             print(f"Reached level {level}, lives: {state.lives}, score: {total_reward:.0f}")
 
         if episode == 1:
