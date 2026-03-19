@@ -96,6 +96,8 @@ def is_move_safe(row, col, action, coily):
         return nr, nc, coily, False
     if coily is None:
         return nr, nc, None, True
+    if (coily[0], coily[1]) == (nr, nc):
+        return nr, nc, coily, False
     pcr, pcc = predict_coily_move(coily[0], coily[1], nr, nc)
     safe = (pcr, pcc) != (nr, nc)
     return nr, nc, (pcr, pcc), safe
@@ -224,13 +226,26 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     safe_moves = [(a, nr, nc, pc) for a, nr, nc, s, pc, _ in valid_moves if s]
     safe_with_followup = [(a, nr, nc, pc) for a, nr, nc, s, pc, f in valid_moves if s and f]
 
-    # DISC: fire if on disc square and Coily close
-    if coily and discs_available and coily_dist <= 2:
-        if (row, col) in discs_available:
+    # Count remaining cubes
+    cubes_remaining = sum(
+        1 for r in range(MAX_ROW + 1) for c in range(r + 1) if not cube_done[r][c]
+    )
+
+    # FINISH LEVEL: if few cubes left, rush to complete (but never onto Coily)
+    if cubes_remaining <= 3:
+        action = bfs_nearest_undone(row, col, cube_done)
+        if action is not None:
+            _, _, _, safe = is_move_safe(row, col, action, coily)
+            if safe:
+                return action
+
+    # DISC: fire when in real danger (no safe followup) and Coily close
+    if coily and discs_available and (row, col) in discs_available:
+        if not safe_moves or (coily_dist <= 2 and not safe_with_followup):
             return DISCS[(row, col)]
 
-    # DISC: navigate toward disc when Coily close
-    if coily and discs_available and coily_dist <= 2:
+    # DISC: navigate toward disc when in danger (no safe followup)
+    if coily and discs_available and not safe_with_followup and coily_dist <= 3:
         target_disc = min(discs_available, key=lambda d: grid_distance(row, col, d[0], d[1]))
         if (row, col) != target_disc:
             for blocked_set in [danger, set()]:
@@ -241,7 +256,7 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
                         return action
 
     # FLEE: Coily close — prefer moves with safe followup (anti-cornering)
-    if coily and coily_dist <= 3:
+    if coily and coily_dist <= 4:
         flee_moves = safe_with_followup if safe_with_followup else safe_moves
         if flee_moves:
             best_action = None
@@ -267,12 +282,15 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
             if safe:
                 return action
 
-    # Fallback: route without safety check
-    action = route_fn(row, col, cube_done)
-    if action is not None:
-        return action
+    # All done or stuck: flee or use disc
+    if coily and discs_available:
+        target_disc = min(discs_available, key=lambda d: grid_distance(row, col, d[0], d[1]))
+        if (row, col) == target_disc:
+            return DISCS[(row, col)]
+        action = bfs_path_to(row, col, target_disc[0], target_disc[1])
+        if action is not None:
+            return action
 
-    # All done or stuck: flee
     if safe_moves:
         if coily:
             best = max(safe_moves, key=lambda x: grid_distance(x[1], x[2], coily[0], coily[1]))
@@ -305,13 +323,13 @@ def run():
         state = reader.read_state(obs, info)
         prev_lives = state.lives
         row, col = state.qbert if state.qbert else (0, 0)
-        cube_done = make_cube_grid()
-        cube_done[row][col] = True
+        reader.detect_cube_initial_color()
+        cube_done = reader.read_cube_done()
         total_reward = 0
-        cubes_colored = 0
         jump_count = 0
         level = 1
         discs_available = set(DISCS.keys())
+        prev_cubes_colored = reader.count_done_cubes()
 
         if episode == 1:
             print("Q*bert Agent (RAM + disc + peel routing)")
@@ -319,6 +337,9 @@ def run():
         print(f"--- Episode {episode}, Level {level} ---")
 
         while not done:
+            cube_done = reader.read_cube_done()
+            cubes_colored = reader.count_done_cubes()
+
             action = pick_action(row, col, cube_done, state, discs_available, level)
             if action == NOOP:
                 action = DOWN
@@ -337,6 +358,10 @@ def run():
             jump_count += 1
             state = reader.read_state(obs, info, jump_reward, done)
 
+            # Re-read cubes from RAM after landing
+            cube_done = reader.read_cube_done()
+            cubes_colored = reader.count_done_cubes()
+
             # DEATH
             if state.lives < prev_lives:
                 prev_lives = state.lives
@@ -351,6 +376,7 @@ def run():
                         total_reward += extra_r
                 state = reader.read_state(obs, info) if not done else state
                 row, col = state.qbert if state.qbert else (0, 0)
+                prev_cubes_colored = cubes_colored
                 continue
 
             # DISC USED
@@ -360,6 +386,7 @@ def run():
                 print(f"  #{jump_count:3d} ** DISC ({row},{col})! {label} ** score:{total_reward:.0f}")
                 row, col = state.qbert if state.qbert else (0, 0)
                 prev_lives = state.lives
+                prev_cubes_colored = cubes_colored
                 continue
 
             # UPDATE POSITION
@@ -371,18 +398,8 @@ def run():
                 if is_valid(nr, nc):
                     row, col = nr, nc
 
-            # UPDATE CUBE STATE
-            was_undone = not cube_done[row][col]
-            if jump_reward >= 25:
-                cube_done[row][col] = True
-                cubes_colored += 1
-            elif level >= 3 and cube_done[row][col]:
-                # Toggle level: stepping on done cube without reward = reverted
-                cube_done[row][col] = False
-                cubes_colored = max(0, cubes_colored - 1)
-                print(f"  #{jump_count:3d} REVERTED ({row},{col}) cubes:{cubes_colored}/{NUM_CUBES}")
-
-            if was_undone and cube_done[row][col]:
+            # LOG CUBE PROGRESS
+            if cubes_colored > prev_cubes_colored:
                 cs = ""
                 if state.coily:
                     d = grid_distance(row, col, state.coily[0], state.coily[1])
@@ -390,28 +407,27 @@ def run():
                 ds = f" discs={len(discs_available)}" if discs_available else ""
                 pl = f" peel={PEEL_LAYERS[(row,col)]}" if level >= 3 else ""
                 print(f"  #{jump_count:3d} {move_name:>11s}->({row},{col}) cubes:{cubes_colored:2d}/{NUM_CUBES} score:{total_reward:.0f}{cs}{ds}{pl}")
+            elif cubes_colored < prev_cubes_colored and level >= 3:
+                print(f"  #{jump_count:3d} REVERTED ({row},{col}) cubes:{cubes_colored}/{NUM_CUBES}")
+            prev_cubes_colored = cubes_colored
 
             # LEVEL COMPLETE
             if cubes_colored >= NUM_CUBES:
                 print(f"\n  === LEVEL {level} COMPLETE! Score: {total_reward:.0f} ===\n")
                 level += 1
-                cubes_colored = 0
-                cube_done = make_cube_grid()
                 jump_count = 0
                 prev_lives = state.lives
                 discs_available = set(DISCS.keys())
                 if not done:
-                    # Wait for level transition animation
-                    for _ in range(80):
-                        obs, r, t, tr, info = env.step(NOOP)
-                        total_reward += r
-                        if t or tr: done = True; break
+                    # Wait for cubes to fully reset (handles flashing animation)
+                    obs, extra_r, done, info = reader.wait_for_cubes_reset()
+                    total_reward += extra_r
                     if not done:
                         obs, extra_r, done, info = reader.wait_for_landing(60)
                         total_reward += extra_r
-                # Force (0,0) — Q*bert always starts at top after level transition
                 row, col = 0, 0
-                cube_done[0][0] = True
+                cube_done = reader.read_cube_done()
+                prev_cubes_colored = reader.count_done_cubes()
                 state = reader.read_state(obs, info) if not done else state
                 print(f"--- Level {level} ---")
                 continue

@@ -27,11 +27,22 @@ NUM_CUBES = 21
 QBERT_Y_ADDR = 67   # Q*bert's Y pixel position
 QBERT_X_ADDR = 43   # Q*bert's X pixel position
 
+# RAM addresses for cube colors, indexed by (row, col)
+# Verified: (1,0)→52, (2,1)→85, (4,1)→3, (5,1)→34
+CUBE_RAM = {
+    (0, 0): 21,
+    (1, 0): 52,  (1, 1): 54,
+    (2, 0): 83,  (2, 1): 85,  (2, 2): 87,
+    (3, 0): 98,  (3, 1): 100, (3, 2): 102, (3, 3): 104,
+    (4, 0): 1,   (4, 1): 3,   (4, 2): 5,   (4, 3): 7,   (4, 4): 9,
+    (5, 0): 32,  (5, 1): 34,  (5, 2): 36,  (5, 3): 38,  (5, 4): 40,  (5, 5): 42,
+}
+
 # Pixel-to-grid constants
 GRID_Y_BASE = 25
 GRID_Y_STEP = 28
-GRID_X_BASE = 78
-GRID_X_ROW_SHIFT = -13
+GRID_X_BASE = 77
+GRID_X_ROW_SHIFT = -12
 GRID_X_COL_STEP = 24
 
 # Enemy colors for pixel detection
@@ -120,6 +131,78 @@ class QbertStateReader:
         self._prev_y = None
         self._prev_x = None
         self._stable_count = 0
+        self._cube_initial_color = None
+
+    def detect_cube_initial_color(self):
+        """Read the initial cube color at level start via majority vote.
+        At level start, at most 1 cube (0,0) is colored, so the most common
+        value among all 21 cubes is the initial color."""
+        ram = self.env.unwrapped.ale.getRAM()
+        values = [int(ram[addr]) for addr in CUBE_RAM.values()]
+        self._cube_initial_color = max(set(values), key=values.count)
+
+    def wait_for_cubes_reset(self, anim_frames=120, max_settle_frames=150):
+        """Wait for level transition: skip flashing animation, then wait for cubes to settle.
+        Returns (obs, total_reward, done, info)."""
+        total_r = 0
+        obs = None
+        info = {}
+        done = False
+        # Phase 1: skip the flashing celebration animation
+        for _ in range(anim_frames):
+            obs, r, t, tr, info = self.env.step(0)
+            total_r += r
+            if t or tr:
+                done = True
+                break
+        if done:
+            return obs, total_r, done, info
+        # Phase 2: wait for cubes to all show the same color (stable for 3 frames)
+        stable_color = None
+        stable_count = 0
+        for _ in range(max_settle_frames):
+            obs, r, t, tr, info = self.env.step(0)
+            total_r += r
+            if t or tr:
+                done = True
+                break
+            ram = self.env.unwrapped.ale.getRAM()
+            values = [int(ram[addr]) for addr in CUBE_RAM.values()]
+            most_common = max(set(values), key=values.count)
+            if values.count(most_common) >= 20 and most_common == stable_color:
+                stable_count += 1
+            elif values.count(most_common) >= 20:
+                stable_color = most_common
+                stable_count = 1
+            else:
+                stable_color = None
+                stable_count = 0
+            if stable_count >= 3:
+                self._cube_initial_color = stable_color
+                break
+        if stable_color is None:
+            # Fallback: use majority vote
+            self.detect_cube_initial_color()
+        return obs, total_r, done, info
+
+    def read_cube_done(self):
+        """Read cube done/not-done state directly from RAM. No manual tracking needed."""
+        ram = self.env.unwrapped.ale.getRAM()
+        init = self._cube_initial_color
+        cube_done = [[False] * (r + 1) for r in range(MAX_ROW + 1)]
+        if init is None:
+            return cube_done
+        for (r, c), addr in CUBE_RAM.items():
+            cube_done[r][c] = (int(ram[addr]) != init)
+        return cube_done
+
+    def count_done_cubes(self):
+        """Count completed cubes from RAM."""
+        ram = self.env.unwrapped.ale.getRAM()
+        init = self._cube_initial_color
+        if init is None:
+            return 0
+        return sum(1 for addr in CUBE_RAM.values() if int(ram[addr]) != init)
 
     def read_qbert_position(self):
         """Read Q*bert's grid position directly from RAM. Instant."""
