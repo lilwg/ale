@@ -152,10 +152,16 @@ def is_move_safe(row, col, action, coily):
     # Unsafe if Coily is on the destination
     if (coily[0], coily[1]) == (nr, nc):
         return nr, nc, coily, False
-    # Unsafe if ANY of Coily's possible chase moves lands on Q*bert's destination
-    possible_moves = predict_coily_moves(coily[0], coily[1], nr, nc)
-    if (nr, nc) in possible_moves:
+    # Check 2 steps of Coily movement (Coily can move during Q*bert's jump animation)
+    # Step 1: Coily chases Q*bert's destination
+    step1_moves = predict_coily_moves(coily[0], coily[1], nr, nc)
+    if (nr, nc) in step1_moves:
         return nr, nc, coily, False
+    # Step 2: from each step-1 position, Coily chases again
+    for s1r, s1c in step1_moves:
+        step2_moves = predict_coily_moves(s1r, s1c, nr, nc)
+        if (nr, nc) in step2_moves:
+            return nr, nc, coily, False
     # Return the most likely predicted position for downstream use
     pcr, pcc = predict_coily_move(coily[0], coily[1], nr, nc)
     return nr, nc, (pcr, pcc), True
