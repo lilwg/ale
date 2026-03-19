@@ -412,11 +412,11 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
             return best[0]
         return safe_moves[0][0]
 
-    # Emergency: use disc if Coily snake is active and we're truly stuck
+    # Emergency: navigate toward disc to lure Coily for a kill (not escape)
     if coily_is_snake and discs_available:
         target_disc = min(discs_available, key=lambda d: grid_distance(row, col, d[0], d[1]))
-        if (row, col) == target_disc:
-            return DISCS[(row, col)]
+        if (row, col) == target_disc and coily_dist <= 1:
+            return DISCS[(row, col)]  # Kill only, not escape
         action = bfs_path_to(row, col, target_disc[0], target_disc[1])
         if action is not None:
             return action
@@ -577,6 +577,8 @@ def run():
                 row, col = actual_pos  # Correct any drift
 
             action = pick_action(row, col, cube_done, state, discs_available, level)
+
+
             if action == NOOP:
                 print(f"  !! STUCK: pos=({row},{col}) cubes={cubes_colored}/21 L{level} C={state.coily} E={state.enemies}")
                 # Don't blindly default to DOWN — pick a safe valid move
