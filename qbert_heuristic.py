@@ -673,15 +673,13 @@ def run():
             prev_cubes_colored = cubes_colored
 
             # LEVEL COMPLETE: detect from game signals.
-            # Method 1: Q*bert pulled off pyramid (position invalid) during celebration.
-            # Method 2: Large score jump (level bonus > 1000 points in one step).
-            # Method 3: Q*bert at (0,0) with high reward (landed on new level).
+            # Q*bert teleports to (0,0) only from: disc use, death/respawn, or level transition.
+            # If Q*bert is now at (0,0) and wasn't before, and didn't die or use disc:
             pos_after = reader.read_qbert_position()
-            game_level_complete = (
-                (pos_after is None and state.lives >= prev_lives and jump_reward > 0)
-                or (jump_reward >= 1000 and not using_disc)
-                or (pos_after == (0, 0) and jump_reward >= 500 and row != 0)
-            )
+            teleported_to_top = (pos_after == (0, 0) and (row, col) != (0, 0)
+                                 and not using_disc and state.lives >= prev_lives)
+            pos_invalid = (pos_after is None and state.lives >= prev_lives and jump_reward > 0)
+            game_level_complete = teleported_to_top or pos_invalid
 
             if game_level_complete:
                 print(f"\n  === LEVEL {level} COMPLETE! Score: {total_reward:.0f} ===\n")
