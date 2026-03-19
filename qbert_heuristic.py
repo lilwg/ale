@@ -661,8 +661,23 @@ def run():
                 print(f"  #{jump_count:3d} REVERTED ({row},{col}) cubes:{cubes_colored}/{NUM_CUBES}")
             prev_cubes_colored = cubes_colored
 
-            # LEVEL COMPLETE
-            if cubes_colored >= NUM_CUBES:
+            # LEVEL COMPLETE: detect from game state, not our cube count.
+            # The game pulls Q*bert off the pyramid for the celebration animation.
+            # If position went invalid after our last action, level is truly complete.
+            pos_after = reader.read_qbert_position()
+            game_level_complete = (pos_after is None and state.lives >= prev_lives
+                                   and jump_reward > 0)
+
+            # Two-hit level: if our count says 21/21 but game disagrees, re-snapshot
+            if not game_level_complete and cubes_colored >= NUM_CUBES:
+                print(f"  ** Multi-hit level: resetting baseline (pass {2 if did_resnapshot else 1}->{'next'})")
+                did_resnapshot = True
+                reader.set_level(level)
+                cube_done = reader.read_cube_done()
+                cubes_colored = reader.count_done_cubes()
+                prev_cubes_colored = cubes_colored
+
+            if game_level_complete:
                 print(f"\n  === LEVEL {level} COMPLETE! Score: {total_reward:.0f} ===\n")
                 level += 1
                 jump_count = 0
