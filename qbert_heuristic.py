@@ -270,8 +270,7 @@ def bfs_peel_route(row, col, cube_done, blocked=set()):
 def pick_action(row, col, cube_done, state, discs_available, level=1):
     coily = state.coily
 
-    # Danger zone: all enemies from RAM + their neighbors + predicted next positions
-    # Enemies bounce DOWN the pyramid, so also block one row below each enemy
+    # Danger zone: all enemies + their neighbors + predicted next positions
     danger = set()
     for epos in state.enemies:
         danger.add(epos)

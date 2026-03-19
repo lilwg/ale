@@ -54,7 +54,7 @@ GRID_X_COL_STEP = 24
 # Enemy colors for pixel detection
 COILY_COLOR = np.array([146, 70, 192])
 GREEN_COLOR = np.array([50, 132, 50])
-RED_BALL_COLOR = np.array([200, 72, 72])
+RED_BALL_COLOR = np.array([181, 83, 40])
 
 # Grid pixel lookup (for enemy detection)
 GRID_PIXELS = {}
@@ -255,10 +255,23 @@ class QbertStateReader:
         """Read enemy positions from pixels. Returns (coily, green, red_ball)."""
         coily_px = find_sprite(frame, COILY_COLOR)
         green_px = find_sprite(frame, GREEN_COLOR)
-        red_px = find_sprite(frame, RED_BALL_COLOR)
         coily = pixel_to_grid(coily_px[0], coily_px[1]) if coily_px else None
         green = pixel_to_grid(green_px[0], green_px[1]) if green_px else None
-        red_ball = pixel_to_grid(red_px[0], red_px[1]) if red_px else None
+        # Red ball: search at each grid position (excluding Q*bert) for the color
+        red_ball = None
+        qbert_pos = self.read_qbert_position()
+        for (r, c), (gy, gx) in GRID_PIXELS.items():
+            if (r, c) == qbert_pos:
+                continue
+            # Check a wider region around the grid center
+            y0, y1 = max(0, gy - 15), min(frame.shape[0], gy + 15)
+            x0, x1 = max(0, gx - 15), min(frame.shape[1], gx + 15)
+            region = frame[y0:y1, x0:x1]
+            diff = np.abs(region.astype(int) - RED_BALL_COLOR)
+            matches = np.sum(np.all(diff < 25, axis=2))
+            if matches >= 3:
+                red_ball = (r, c)
+                break  # found one, that's enough
         return coily, green, red_ball
 
     def read_state(self, obs, info, reward=0.0, done=False):
