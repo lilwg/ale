@@ -434,9 +434,22 @@ def run():
     fast = "--fast" in sys.argv
     if fast:
         speed = max(speed, 3)
-    env = gym.make("ALE/Qbert-v5", render_mode="human", repeat_action_probability=0.0)
     if speed > 1:
-        env.metadata["render_fps"] = 60 * speed
+        import cv2
+        env = gym.make("ALE/Qbert-v5", render_mode="rgb_array", repeat_action_probability=0.0)
+        _render_counter = [0]
+        _orig_step = env.step
+        def _fast_step(action):
+            result = _orig_step(action)
+            _render_counter[0] += 1
+            if _render_counter[0] % speed == 0:
+                frame = env.render()
+                cv2.imshow("Q*bert", frame[:, :, ::-1])
+                cv2.waitKey(1)
+            return result
+        env.step = _fast_step
+    else:
+        env = gym.make("ALE/Qbert-v5", render_mode="human", repeat_action_probability=0.0)
     reader = QbertStateReader(env)
     episode = 0
 
