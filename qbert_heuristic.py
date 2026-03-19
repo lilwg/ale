@@ -567,8 +567,6 @@ def run():
             cube_done = reader.read_cube_done()
             cubes_colored = reader.count_done_cubes()
 
-            # (target color learning handles multi-hit levels automatically)
-
             # Re-read actual position from RAM before every decision
             actual_pos = reader.read_qbert_position()
             if actual_pos:
@@ -668,8 +666,42 @@ def run():
                 print(f"  #{jump_count:3d} REVERTED ({row},{col}) cubes:{cubes_colored}/{NUM_CUBES}")
             prev_cubes_colored = cubes_colored
 
-            # LEVEL COMPLETE: baseline says 21/21 cubes changed
+            # LEVEL COMPLETE: baseline says 21/21 cubes changed.
+            # Verify with game: wait a few frames for celebration to start.
             if cubes_colored >= NUM_CUBES:
+                # Check if game celebrates: send NOOPs and watch for
+                # score jump (level bonus) or position going invalid
+                game_confirmed = False
+                check_score = total_reward
+                for _ in range(25):
+                    obs_c, r_c, t_c, tr_c, info_c = env.step(NOOP)
+                    total_reward += r_c
+                    if t_c or tr_c:
+                        done = True
+                        game_confirmed = True
+                        break
+                    if reader.read_qbert_position() is None:
+                        game_confirmed = True
+                        break
+                # Score jumped significantly = level bonus = game completed
+                if total_reward - check_score >= 500:
+                    game_confirmed = True
+                if not done:
+                    state = reader.read_state(obs_c, info_c)
+                if not game_confirmed and not done:
+                    # Multi-hit level: re-snapshot baseline for next pass
+                    print(f"  ** Multi-hit: re-snapshot for next pass")
+                    reader.set_level(level)
+                    cube_done = reader.read_cube_done()
+                    prev_cubes_colored = reader.count_done_cubes()
+                    if state.qbert:
+                        row, col = state.qbert
+                    prev_lives = state.lives
+                    continue
+            else:
+                game_confirmed = False
+
+            if game_confirmed:
                 print(f"\n  === LEVEL {level} COMPLETE! Score: {total_reward:.0f} ===\n")
                 level += 1
                 jump_count = 0
