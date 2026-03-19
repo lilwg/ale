@@ -314,8 +314,9 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     if coily and discs_available:
         on_disc = (row, col) in discs_available
 
-        # Fire disc: Coily adjacent (guaranteed kill) or truly cornered
-        if on_disc and (coily_dist <= 1 or not safe_with_followup):
+        # Fire disc: only when Coily is adjacent (guaranteed kill)
+        # or zero safe moves at all (truly cornered, last resort)
+        if on_disc and (coily_dist <= 1 or not safe_moves):
             return DISCS[(row, col)]
 
         # Lure mode: navigate toward disc when Coily is active
@@ -385,10 +386,11 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     # ROUTE: peel-based Dijkstra for L3+ (outside-in, reversion penalty),
     # simple BFS for L1-2
     route_fn = bfs_peel_route if level >= 3 else bfs_nearest_undone
+    # Try with danger zone blocked first, then without (but always check Coily safety)
     for blocked_set in [danger, set()]:
         action = route_fn(row, col, cube_done, blocked_set)
         if action is not None:
-            nr, nc, _, safe = is_move_safe(row, col, action, coily)
+            _, _, _, safe = is_move_safe(row, col, action, coily)
             if safe:
                 return action
 
@@ -458,7 +460,17 @@ def run():
             if action == NOOP:
                 action = DOWN
 
+            # Safety gate: verify the action leads to a valid position
+            # (disc actions intentionally go off-board, so allow those)
             using_disc = (row, col) in discs_available and action == DISCS.get((row, col))
+            if not using_disc and action in MOVES:
+                dr, dc, _ = MOVES[action]
+                nr, nc = row + dr, col + dc
+                if not is_valid(nr, nc):
+                    # Bad action — pick any valid neighbor instead
+                    for alt_action, _, _ in neighbors(row, col):
+                        action = alt_action
+                        break
             move_name = MOVES.get(action, (0, 0, "disc"))[2] if action in MOVES else "disc"
 
             obs, r, t, tr, info = env.step(action)
