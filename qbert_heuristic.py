@@ -13,6 +13,7 @@ Requires: gymnasium, ale-py, numpy
 """
 
 import heapq
+import sys
 import gymnasium as gym
 import ale_py
 import numpy as np
@@ -429,7 +430,13 @@ def make_cube_grid():
 
 
 def run():
+    speed = int(sys.argv[sys.argv.index("--speed") + 1]) if "--speed" in sys.argv else 1
+    fast = "--fast" in sys.argv
+    if fast:
+        speed = max(speed, 3)
     env = gym.make("ALE/Qbert-v5", render_mode="human", repeat_action_probability=0.0)
+    if speed > 1:
+        env.metadata["render_fps"] = 60 * speed
     reader = QbertStateReader(env)
     episode = 0
 
