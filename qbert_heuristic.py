@@ -471,7 +471,6 @@ def run():
         jump_count = 0
         discs_available = set(DISCS.keys())
         prev_cubes_colored = reader.count_done_cubes()
-        did_resnapshot = False  # only re-snapshot once per level for two-hit detection
 
         # Skip to target level by playing earlier levels without rendering
         if start_level > 1 and level < start_level:
@@ -568,15 +567,7 @@ def run():
             cube_done = reader.read_cube_done()
             cubes_colored = reader.count_done_cubes()
 
-            # Two-hit level detection: if all cubes read as "done" but the game
-            # hasn't completed the level, cubes need a second hit. Re-snapshot
-            # the baseline from current values to start the second pass.
-            if cubes_colored >= NUM_CUBES and not did_resnapshot:
-                did_resnapshot = True
-                print(f"  ** Re-snapshot: cubes={cubes_colored}/21 on L{level}, resetting baseline for 2nd pass")
-                reader.set_level(level)  # re-snapshots baseline from current values
-                cube_done = reader.read_cube_done()
-                cubes_colored = reader.count_done_cubes()
+            # (target color learning handles multi-hit levels automatically)
 
             # Re-read actual position from RAM before every decision
             actual_pos = reader.read_qbert_position()
@@ -622,6 +613,10 @@ def run():
             total_reward += jump_reward
             jump_count += 1
             state = reader.read_state(obs, info, jump_reward, done)
+
+            # Learn target color from 25-point cube rewards
+            if jump_reward >= 25 and state.qbert:
+                reader.learn_target_color(state.qbert)
 
             # Re-read cubes from RAM after landing
             cube_done = reader.read_cube_done()
@@ -683,22 +678,12 @@ def run():
             game_level_complete = (pos_after is None and state.lives >= prev_lives
                                    and jump_reward > 0)
 
-            # Two-hit level: if our count says 21/21 but game disagrees, re-snapshot
-            if not game_level_complete and cubes_colored >= NUM_CUBES:
-                print(f"  ** Multi-hit level: resetting baseline (pass {2 if did_resnapshot else 1}->{'next'})")
-                did_resnapshot = True
-                reader.set_level(level)
-                cube_done = reader.read_cube_done()
-                cubes_colored = reader.count_done_cubes()
-                prev_cubes_colored = cubes_colored
-
             if game_level_complete:
                 print(f"\n  === LEVEL {level} COMPLETE! Score: {total_reward:.0f} ===\n")
                 level += 1
                 jump_count = 0
                 prev_lives = state.lives
                 discs_available = set(DISCS.keys())
-                did_resnapshot = False
                 reader.set_level(level)  # sets color cycle
                 if not done:
                     # Spam first move until level starts — baseline captured inside
