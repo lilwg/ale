@@ -222,6 +222,7 @@ class QbertStateReader:
                 baseline_val = self._cube_start_values.get((r, c))
                 if val != baseline_val:
                     self._cube_target_color = val
+                    print(f"  ** Learned target color: {val} at ({r},{c}), baseline was {baseline_val}")
 
     def read_cube_done(self):
         """Read cube done/not-done state from RAM.

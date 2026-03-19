@@ -673,13 +673,25 @@ def run():
             prev_cubes_colored = cubes_colored
 
             # LEVEL COMPLETE: detect from game signals.
-            # Q*bert teleports to (0,0) only from: disc use, death/respawn, or level transition.
-            # If Q*bert is now at (0,0) and wasn't before, and didn't die or use disc:
+            # 1. Q*bert position goes invalid (celebration animation)
+            # 2. Q*bert teleports to (0,0) unexpectedly
+            # 3. Cubes reset: most cubes suddenly at a uniform non-target color
             pos_after = reader.read_qbert_position()
-            teleported_to_top = (pos_after == (0, 0) and (row, col) != (0, 0)
-                                 and not using_disc and state.lives >= prev_lives)
-            pos_invalid = (pos_after is None and state.lives >= prev_lives and jump_reward > 0)
-            game_level_complete = teleported_to_top or pos_invalid
+            game_level_complete = False
+
+            if pos_after is None and state.lives >= prev_lives and jump_reward > 0:
+                game_level_complete = True
+            elif pos_after == (0, 0) and (row, col) != (0, 0) and not using_disc and state.lives >= prev_lives:
+                game_level_complete = True
+
+            # Detect level reset: if cubes suddenly mostly uniform at a non-target color
+            if not game_level_complete and reader._cube_target_color is not None:
+                ram = env.unwrapped.ale.getRAM()
+                vals = [int(ram[addr]) for addr in CUBE_RAM.values()]
+                most_common = max(set(vals), key=vals.count)
+                if most_common != reader._cube_target_color and vals.count(most_common) >= 18:
+                    game_level_complete = True
+                    print(f"  ** Level reset detected: cubes mostly at {most_common}, target was {reader._cube_target_color}")
 
             if game_level_complete:
                 print(f"\n  === LEVEL {level} COMPLETE! Score: {total_reward:.0f} ===\n")
