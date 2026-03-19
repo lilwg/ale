@@ -161,56 +161,48 @@ class QbertStateReader:
                                     for (r, c), addr in CUBE_RAM.items()}
 
     def wait_for_level_start(self, first_action=5, max_frames=300):
-        """Two-phase level start with immediate first move.
-        Phase 1: Send first_action each frame, wait for Q*bert to stabilize at (0,0)
-                 (celebration animation over). Q*bert won't actually move during celebration.
-        Phase 2: Keep sending first_action. When Q*bert leaves (0,0), the level started.
-                 Capture cube baseline from the last stable (0,0) frame.
-        first_action=5 is DOWN (0,0)->(1,0), always valid from start position.
+        """Two-phase level start: NOOP during celebration, then first move.
+        Phase 1: Send NOOP, wait for Q*bert to leave then return to (0,0).
+        Phase 2: Send first_action until Q*bert moves. Capture baseline.
         Returns (obs, total_reward, done, info)."""
         total_r = 0
         obs = None
         info = {}
         done = False
-        # Phase 1: wait for Q*bert to settle at (0,0) — celebration ending
-        at_top_count = 0
         left_top = False
-        baseline_snapshot = None
+        at_top_count = 0
+        # Phase 1: NOOP during celebration (don't risk DOWN during animation)
         for _ in range(max_frames):
-            obs, r, t, tr, info = self.env.step(first_action)
+            obs, r, t, tr, info = self.env.step(0)  # NOOP
             total_r += r
             if t or tr:
                 done = True
                 break
             pos = self.read_qbert_position()
             if pos == (0, 0):
-                at_top_count += 1
-                if not left_top and at_top_count < 3:
-                    continue  # Still at initial (0,0), wait to leave first
-                if left_top and at_top_count >= 3:
-                    # Q*bert returned to (0,0) and is stable — celebration over
-                    # Now snapshot baseline and wait for the first move to work
-                    ram = self.env.unwrapped.ale.getRAM()
-                    baseline_snapshot = {(r, c): int(ram[addr])
-                                         for (r, c), addr in CUBE_RAM.items()}
-                    # Phase 2: keep sending action until Q*bert moves
-                    for _ in range(60):
-                        ram = self.env.unwrapped.ale.getRAM()
-                        baseline_snapshot = {(r, c): int(ram[addr])
-                                             for (r, c), addr in CUBE_RAM.items()}
-                        obs, r, t, tr, info = self.env.step(first_action)
-                        total_r += r
-                        if t or tr:
-                            done = True
-                            break
-                        pos2 = self.read_qbert_position()
-                        if pos2 is not None and pos2 != (0, 0):
-                            self._cube_start_values = baseline_snapshot
-                            break
-                    break
+                if left_top:
+                    at_top_count += 1
+                    if at_top_count >= 3:
+                        break  # Celebration over, Q*bert stable at (0,0)
             else:
                 left_top = True
                 at_top_count = 0
+        if done:
+            return obs, total_r, done, info
+        # Phase 2: send first_action until Q*bert moves (level started)
+        for _ in range(60):
+            # Snapshot baseline BEFORE each attempt
+            ram = self.env.unwrapped.ale.getRAM()
+            self._cube_start_values = {(r, c): int(ram[addr])
+                                        for (r, c), addr in CUBE_RAM.items()}
+            obs, r, t, tr, info = self.env.step(first_action)
+            total_r += r
+            if t or tr:
+                done = True
+                break
+            pos = self.read_qbert_position()
+            if pos is not None and pos != (0, 0):
+                break  # Move worked — level started
         # Let Q*bert finish landing
         if not done:
             obs, r, done, info = self.wait_for_landing(15)
