@@ -371,6 +371,12 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
                 # Row 5 is a trap — very few escape routes, enemies approach from above
                 if nr == MAX_ROW and (state.enemies or coily):
                     dead_end_penalty -= 12
+                # Corners (5,0) and (5,5) have only 1 neighbor — death trap
+                if (nr, nc) in ((5, 0), (5, 5)) and (state.enemies or coily):
+                    dead_end_penalty -= 25
+                # Edges (col==0 or col==row) are enemy bounce paths
+                if (nc == 0 or nc == nr) and state.enemies:
+                    dead_end_penalty -= 5
 
                 # Disc proximity bonus when luring
                 disc_bonus = 0
@@ -391,7 +397,6 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     # ROUTE: peel-based Dijkstra for L3+ (outside-in, reversion penalty),
     # simple BFS for L1-2
     route_fn = bfs_peel_route if level >= 3 else bfs_nearest_undone
-    # Try with danger zone blocked first, then without (but always check Coily safety)
     for blocked_set in [danger, set()]:
         action = route_fn(row, col, cube_done, blocked_set)
         if action is not None:
