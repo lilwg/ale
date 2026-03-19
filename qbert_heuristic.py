@@ -488,15 +488,21 @@ def run():
                 cube_done = reader.read_cube_done()
                 cubes_colored = reader.count_done_cubes()
 
-            action = pick_action(row, col, cube_done, state, discs_available, level)
-            if action == NOOP:
-                action = DOWN
-
-            # Safety gate: re-read actual position from RAM and verify the action
-            # leads to a valid position (prevents drift from causing falls)
+            # Re-read actual position from RAM before every decision
             actual_pos = reader.read_qbert_position()
             if actual_pos:
                 row, col = actual_pos  # Correct any drift
+
+            action = pick_action(row, col, cube_done, state, discs_available, level)
+            if action == NOOP:
+                # Don't blindly default to DOWN — pick a safe valid move
+                for alt_action, _, _ in neighbors(row, col):
+                    action = alt_action
+                    break
+                else:
+                    action = DOWN
+
+            # Safety gate: verify the action leads to a valid position
             using_disc = (row, col) in discs_available and action == DISCS.get((row, col))
             if not using_disc and action in MOVES:
                 dr, dc, _ = MOVES[action]
