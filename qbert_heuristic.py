@@ -288,7 +288,10 @@ def bfs_peel_route(row, col, cube_done, blocked=set()):
     return None
 
 
+_no_progress_count = 0
+
 def pick_action(row, col, cube_done, state, discs_available, level=1):
+    global _no_progress_count
     coily = state.coily
 
     # Danger zone: all enemies + their neighbors + predicted next positions
@@ -424,7 +427,12 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     # ROUTE: peel-based Dijkstra for L3+ (outside-in, reversion penalty),
     # simple BFS for L1-2
     route_fn = bfs_peel_route if level >= 3 else bfs_nearest_undone
-    for blocked_set in [danger, set()]:
+    # If stuck (no progress for many jumps), ignore danger zone to break out
+    if _no_progress_count >= 8:
+        blocked_options = [set()]  # skip danger blocking entirely
+    else:
+        blocked_options = [danger, set()]
+    for blocked_set in blocked_options:
         action = route_fn(row, col, cube_done, blocked_set)
         if action is not None:
             _, _, _, safe = is_move_safe(row, col, action, coily)
@@ -698,6 +706,11 @@ def run():
                 print(f"  #{jump_count:3d} {move_name:>11s}->({row},{col}) cubes:{cubes_colored}/{NUM_CUBES} score:{total_reward:.0f} r={jump_reward:.0f}{cs}{tgt}")
             elif cubes_colored < prev_cubes_colored and level >= 3:
                 print(f"  #{jump_count:3d} REVERTED ({row},{col}) cubes:{cubes_colored}/{NUM_CUBES}")
+            # Track stuck detection for routing
+            if cubes_colored > prev_cubes_colored:
+                _no_progress_count = 0
+            else:
+                _no_progress_count += 1
             prev_cubes_colored = cubes_colored
 
             # LEVEL COMPLETE: baseline says 21/21 cubes changed.
