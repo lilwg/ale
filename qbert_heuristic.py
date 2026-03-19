@@ -133,6 +133,27 @@ def count_escape_routes(row, col, coily):
     return count
 
 
+def survives_n_steps(row, col, coily, n=3):
+    """Check if Q*bert can survive n steps from (row, col) with Coily chasing.
+    Returns True if at least one safe path of length n exists."""
+    if n <= 0:
+        return True
+    if coily is None:
+        return True
+    for _, nr, nc in neighbors(row, col):
+        # Check if this move is safe (Coily won't land on us)
+        if (nr, nc) == coily:
+            continue
+        possible = predict_coily_moves(coily[0], coily[1], nr, nc)
+        if (nr, nc) in possible:
+            continue
+        # Simulate Coily's move and recurse
+        pc = predict_coily_move(coily[0], coily[1], nr, nc)
+        if survives_n_steps(nr, nc, pc, n - 1):
+            return True
+    return False
+
+
 def coily_can_reach(coily, target):
     """Check if Coily is on target or adjacent to it (can reach in 1 step)."""
     if coily == target:
@@ -291,15 +312,22 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
 
     coily_dist = grid_distance(row, col, coily[0], coily[1]) if coily else 99
 
-    # Pre-compute safe moves with 2-hop lookahead + escape route scoring
+    # Pre-compute safe moves with 3-step lookahead
     valid_moves = []
     for action, nr, nc in neighbors(row, col):
         _, _, predicted_coily, safe = is_move_safe(row, col, action, coily)
         followup = has_safe_followup(row, col, action, coily) if safe else False
         escapes = count_escape_routes(nr, nc, predicted_coily if safe else coily)
-        valid_moves.append((action, nr, nc, safe, predicted_coily, followup, escapes))
-    safe_moves = [(a, nr, nc, pc, esc) for a, nr, nc, s, pc, _, esc in valid_moves if s]
-    safe_with_followup = [(a, nr, nc, pc, esc) for a, nr, nc, s, pc, f, esc in valid_moves if s and f]
+        # 3-step survival check: can Q*bert survive 3 more steps from this position?
+        survives = survives_n_steps(nr, nc, predicted_coily, 3) if safe else False
+        valid_moves.append((action, nr, nc, safe, predicted_coily, followup, escapes, survives))
+    safe_moves = [(a, nr, nc, pc, esc) for a, nr, nc, s, pc, _, esc, surv in valid_moves if s and surv]
+    safe_with_followup = [(a, nr, nc, pc, esc) for a, nr, nc, s, pc, f, esc, surv in valid_moves if s and f and surv]
+    # Fallback if 3-step filter is too strict
+    if not safe_moves:
+        safe_moves = [(a, nr, nc, pc, esc) for a, nr, nc, s, pc, _, esc, _ in valid_moves if s]
+    if not safe_with_followup:
+        safe_with_followup = [(a, nr, nc, pc, esc) for a, nr, nc, s, pc, f, esc, _ in valid_moves if s and f]
 
     # Count remaining cubes
     cubes_remaining = sum(
