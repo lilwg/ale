@@ -79,6 +79,7 @@ def grid_distance(r1, c1, r2, c2):
 
 
 def predict_coily_move(cr, cc, qr, qc):
+    """Predict Coily's best chase move. Returns single (row, col)."""
     best = (cr, cc)
     best_dist = grid_distance(cr, cc, qr, qc)
     for _, nr, nc in neighbors(cr, cc):
@@ -87,6 +88,22 @@ def predict_coily_move(cr, cc, qr, qc):
             best_dist = d
             best = (nr, nc)
     return best
+
+
+def predict_coily_moves(cr, cc, qr, qc):
+    """Return ALL positions Coily could move to (handles ties).
+    Only includes moves that strictly improve distance (matching predict_coily_move).
+    Returns [(cr,cc)] if no improving move exists (Coily stays)."""
+    curr_dist = grid_distance(cr, cc, qr, qc)
+    best_dist = curr_dist
+    for _, nr, nc in neighbors(cr, cc):
+        d = grid_distance(nr, nc, qr, qc)
+        if d < best_dist:
+            best_dist = d
+    if best_dist >= curr_dist:
+        return [(cr, cc)]  # No improvement — Coily stays
+    return [(nr, nc) for _, nr, nc in neighbors(cr, cc)
+            if grid_distance(nr, nc, qr, qc) == best_dist]
 
 
 def simulate_coily(coily, qbert_path):
@@ -135,10 +152,13 @@ def is_move_safe(row, col, action, coily):
     # Unsafe if Coily is on the destination
     if (coily[0], coily[1]) == (nr, nc):
         return nr, nc, coily, False
-    # Unsafe if Coily's predicted chase move lands on destination
+    # Unsafe if ANY of Coily's possible chase moves lands on Q*bert's destination
+    possible_moves = predict_coily_moves(coily[0], coily[1], nr, nc)
+    if (nr, nc) in possible_moves:
+        return nr, nc, coily, False
+    # Return the most likely predicted position for downstream use
     pcr, pcc = predict_coily_move(coily[0], coily[1], nr, nc)
-    safe = (pcr, pcc) != (nr, nc)
-    return nr, nc, (pcr, pcc), safe
+    return nr, nc, (pcr, pcc), True
 
 
 def has_safe_followup(row, col, action, coily):
@@ -401,11 +421,11 @@ def run():
         state = reader.read_state(obs, info)
         prev_lives = state.lives
         row, col = state.qbert if state.qbert else (0, 0)
-        reader.detect_cube_initial_color()
+        level = 1
+        reader.set_level(level)
         cube_done = reader.read_cube_done()
         total_reward = 0
         jump_count = 0
-        level = 1
         discs_available = set(DISCS.keys())
         prev_cubes_colored = reader.count_done_cubes()
 
@@ -497,16 +517,28 @@ def run():
                 prev_lives = state.lives
                 discs_available = set(DISCS.keys())
                 if not done:
-                    # Wait for cubes to fully reset (handles flashing animation)
-                    obs, extra_r, done, info = reader.wait_for_cubes_reset()
+                    obs, extra_r, done, info = reader.wait_for_level_start()
                     total_reward += extra_r
                     if not done:
-                        obs, extra_r, done, info = reader.wait_for_landing(60)
+                        obs, extra_r, done, info = reader.wait_for_landing(40)
                         total_reward += extra_r
-                row, col = 0, 0
+                # Use known color cycle for reliable initial color detection
+                reader.set_level(level)
+                state = reader.read_state(obs, info) if not done else state
+                # Handle death during level transition
+                if not done and state.lives < prev_lives:
+                    prev_lives = state.lives
+                    for _ in range(50):
+                        obs, r, t, tr, info = env.step(NOOP)
+                        total_reward += r
+                        if t or tr: done = True; break
+                    if not done:
+                        obs, extra_r, done, info = reader.wait_for_landing(40)
+                        total_reward += extra_r
+                    state = reader.read_state(obs, info) if not done else state
+                row, col = state.qbert if (not done and state.qbert) else (0, 0)
                 cube_done = reader.read_cube_done()
                 prev_cubes_colored = reader.count_done_cubes()
-                state = reader.read_state(obs, info) if not done else state
                 print(f"--- Level {level} ---")
                 continue
 

@@ -48,6 +48,7 @@ GRID_X_COL_STEP = 24
 # Enemy colors for pixel detection
 COILY_COLOR = np.array([146, 70, 192])
 GREEN_COLOR = np.array([50, 132, 50])
+RED_BALL_COLOR = np.array([200, 72, 72])
 
 # Grid pixel lookup (for enemy detection)
 GRID_PIXELS = {}
@@ -103,12 +104,13 @@ def find_sprite(frame, color, tol=40, min_pixels=3):
 
 class QbertState:
     """Snapshot of the game state."""
-    __slots__ = ['qbert', 'coily', 'green', 'lives', 'reward', 'done']
+    __slots__ = ['qbert', 'coily', 'green', 'red_ball', 'lives', 'reward', 'done']
 
     def __init__(self):
         self.qbert = None    # (row, col) or None
         self.coily = None    # (row, col) or None
         self.green = None    # (row, col) or None
+        self.red_ball = None # (row, col) or None
         self.lives = 0
         self.reward = 0.0
         self.done = False
@@ -132,6 +134,17 @@ class QbertStateReader:
         self._prev_x = None
         self._stable_count = 0
         self._cube_initial_color = None
+        self._level = 1
+
+    # Known level color cycle (verified empirically, repeats every 4 levels)
+    LEVEL_COLORS = {1: 148, 2: 26, 3: 10, 4: 152}
+
+    def set_level(self, level):
+        """Set the current level and detect the initial cube color."""
+        self._level = level
+        # Use known color cycle (period 4)
+        cycle_pos = ((level - 1) % 4) + 1
+        self._cube_initial_color = self.LEVEL_COLORS[cycle_pos]
 
     def detect_cube_initial_color(self):
         """Read the initial cube color at level start via majority vote.
@@ -139,53 +152,35 @@ class QbertStateReader:
         value among all 21 cubes is the initial color."""
         ram = self.env.unwrapped.ale.getRAM()
         values = [int(ram[addr]) for addr in CUBE_RAM.values()]
-        self._cube_initial_color = max(set(values), key=values.count)
+        detected = max(set(values), key=values.count)
+        # Validate against known cycle
+        cycle_pos = ((self._level - 1) % 4) + 1
+        expected = self.LEVEL_COLORS[cycle_pos]
+        # Trust the cycle if detection disagrees (stale cube data)
+        self._cube_initial_color = expected if detected != expected else detected
 
-    def wait_for_cubes_reset(self, anim_frames=140, max_settle_frames=160):
-        """Wait for level transition: skip flashing animation, then wait for cubes to settle.
+    def wait_for_level_start(self, max_frames=180):
+        """Wait for level transition: skip animation until Q*bert appears at (0,0).
         Returns (obs, total_reward, done, info)."""
         total_r = 0
         obs = None
         info = {}
         done = False
-        # Phase 1: skip the flashing celebration animation
-        for _ in range(anim_frames):
+        # Wait until Q*bert is detected at (0,0), indicating the new level started
+        found_top = False
+        for _ in range(max_frames):
             obs, r, t, tr, info = self.env.step(0)
             total_r += r
             if t or tr:
                 done = True
                 break
-        if done:
-            return obs, total_r, done, info
-        # Phase 2: wait for ALL 21 cubes to show the same color, stable for 5+ frames.
-        # Must require all 21 (not 20) to avoid triggering during flash animations.
-        stable_color = None
-        stable_count = 0
-        for _ in range(max_settle_frames):
-            obs, r, t, tr, info = self.env.step(0)
-            total_r += r
-            if t or tr:
-                done = True
-                break
-            ram = self.env.unwrapped.ale.getRAM()
-            values = [int(ram[addr]) for addr in CUBE_RAM.values()]
-            unique = set(values)
-            if len(unique) == 1:
-                color = values[0]
-                if color == stable_color:
-                    stable_count += 1
-                else:
-                    stable_color = color
-                    stable_count = 1
-                if stable_count >= 5:
-                    self._cube_initial_color = stable_color
-                    break
+            pos = self.read_qbert_position()
+            if pos == (0, 0):
+                if found_top:
+                    break  # Stable at (0,0) for 2 frames
+                found_top = True
             else:
-                stable_color = None
-                stable_count = 0
-        if stable_color is None:
-            # Fallback: use majority vote (some cubes may differ due to Q*bert landing)
-            self.detect_cube_initial_color()
+                found_top = False
         return obs, total_r, done, info
 
     def read_cube_done(self):
@@ -215,18 +210,20 @@ class QbertStateReader:
         return ram_to_grid(y, x)
 
     def read_enemies(self, frame):
-        """Read enemy positions from pixels. Returns (coily, green)."""
+        """Read enemy positions from pixels. Returns (coily, green, red_ball)."""
         coily_px = find_sprite(frame, COILY_COLOR)
         green_px = find_sprite(frame, GREEN_COLOR)
+        red_px = find_sprite(frame, RED_BALL_COLOR)
         coily = pixel_to_grid(coily_px[0], coily_px[1]) if coily_px else None
         green = pixel_to_grid(green_px[0], green_px[1]) if green_px else None
-        return coily, green
+        red_ball = pixel_to_grid(red_px[0], red_px[1]) if red_px else None
+        return coily, green, red_ball
 
     def read_state(self, obs, info, reward=0.0, done=False):
         """Read full game state. Returns QbertState."""
         state = QbertState()
         state.qbert = self.read_qbert_position()
-        state.coily, state.green = self.read_enemies(obs)
+        state.coily, state.green, state.red_ball = self.read_enemies(obs)
         state.lives = info.get('lives', 0)
         state.reward = reward
         state.done = done

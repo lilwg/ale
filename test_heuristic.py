@@ -22,11 +22,11 @@ for episode in range(1, MAX_EPISODES + 1):
     state = reader.read_state(obs, info)
     prev_lives = state.lives
     row, col = state.qbert if state.qbert else (0, 0)
-    reader.detect_cube_initial_color()
+    level = 1
+    reader.set_level(level)
     cube_done = reader.read_cube_done()
     total_reward = 0
     jump_count = 0
-    level = 1
     discs_available = set(DISCS.keys())
     prev_cubes_colored = reader.count_done_cubes()
 
@@ -121,12 +121,25 @@ for episode in range(1, MAX_EPISODES + 1):
             prev_lives = state.lives
             discs_available = set(DISCS.keys())
             if not done:
-                obs, extra_r, done, info = reader.wait_for_cubes_reset()
+                obs, extra_r, done, info = reader.wait_for_level_start()
                 total_reward += extra_r
                 if not done:
-                    obs, extra_r, done, info = reader.wait_for_landing(60)
+                    obs, extra_r, done, info = reader.wait_for_landing(40)
                     total_reward += extra_r
-            row, col = 0, 0
+            reader.set_level(level)
+            state = reader.read_state(obs, info) if not done else state
+            if not done and state.lives < prev_lives:
+                prev_lives = state.lives
+                print(f"  ** DIED during level transition **")
+                for _ in range(50):
+                    obs, r2, t2, tr2, info = env.step(0)
+                    total_reward += r2
+                    if t2 or tr2: done = True; break
+                if not done:
+                    obs, extra_r, done, info = reader.wait_for_landing(40)
+                    total_reward += extra_r
+                state = reader.read_state(obs, info) if not done else state
+            row, col = state.qbert if (not done and state.qbert) else (0, 0)
             cube_done = reader.read_cube_done()
             prev_cubes_colored = reader.count_done_cubes()
             state = reader.read_state(obs, info) if not done else state
