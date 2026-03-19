@@ -374,7 +374,7 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
                 # Corners (5,0) and (5,5) have only 1 neighbor — death trap
                 if (nr, nc) in ((5, 0), (5, 5)) and (state.enemies or coily):
                     dead_end_penalty -= 25
-                # Edges (col==0 or col==row) are enemy bounce paths
+                # Edges (col==0 or col==row) are red ball bounce paths
                 if (nc == 0 or nc == nr) and state.enemies:
                     dead_end_penalty -= 5
 
