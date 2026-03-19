@@ -336,8 +336,9 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
                             if safe:
                                 return action
 
-    # FLEE + ROUTE: unified scoring when Coily is present
-    if coily and coily_dist <= 5:
+    # FLEE + ROUTE: unified scoring only when Coily is close
+    # At distance 4+, normal BFS routing handles avoidance via danger zone
+    if coily and coily_dist <= 3:
         # Score all safe moves by combined value
         candidates = safe_with_followup if safe_with_followup else safe_moves
         if candidates:
@@ -353,8 +354,8 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
                 coily_adjacent = coily_can_reach(coily, (nr, nc))
                 safety = d * 2 + esc * 3 + (-20 if coily_adjacent else 0)
 
-                # Productivity: prefer uncolored cubes
-                cube_val = 5 if not cube_done[nr][nc] else 0
+                # Productivity: strongly prefer uncolored cubes
+                cube_val = 10 if not cube_done[nr][nc] else -3
                 # Penalty for reverting done cubes on toggle levels
                 if level >= 3 and cube_done[nr][nc]:
                     cube_val = -8
