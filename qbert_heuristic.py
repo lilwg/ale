@@ -431,6 +431,7 @@ def make_cube_grid():
 
 def run():
     speed = int(sys.argv[sys.argv.index("--speed") + 1]) if "--speed" in sys.argv else 1
+    start_level = int(sys.argv[sys.argv.index("--level") + 1]) if "--level" in sys.argv else 1
     fast = "--fast" in sys.argv
     if fast:
         speed = max(speed, 3)
@@ -470,6 +471,77 @@ def run():
         jump_count = 0
         discs_available = set(DISCS.keys())
         prev_cubes_colored = reader.count_done_cubes()
+
+        # Skip to target level by playing earlier levels without rendering
+        if start_level > 1 and level < start_level:
+            print(f"Skipping to level {start_level}...")
+            # Temporarily disable rendering for speed
+            orig_step = env.step
+            if speed > 1:
+                env.step = _orig_step  # bypass cv2 rendering
+            while level < start_level and not done:
+                cube_done = reader.read_cube_done()
+                cubes_colored = reader.count_done_cubes()
+                if cubes_colored >= NUM_CUBES:
+                    reader.set_level(level)
+                    cube_done = reader.read_cube_done()
+                    cubes_colored = reader.count_done_cubes()
+                action = pick_action(row, col, cube_done, state, discs_available, level)
+                if action == NOOP:
+                    for a, _, _ in neighbors(row, col):
+                        action = a; break
+                actual_pos = reader.read_qbert_position()
+                if actual_pos: row, col = actual_pos
+                using_disc = (row, col) in discs_available and action == DISCS.get((row, col))
+                obs, r, t, tr, info = env.step(action)
+                done = t or tr
+                if not done:
+                    obs, sr, done, info = reader.wait_for_landing(40 if using_disc else 15)
+                    r += sr
+                total_reward += r
+                state = reader.read_state(obs, info)
+                cube_done = reader.read_cube_done()
+                cubes_colored = reader.count_done_cubes()
+                if state.lives < prev_lives:
+                    prev_lives = state.lives
+                    if not done:
+                        for _ in range(50):
+                            obs, r2, t2, tr2, info = env.step(0)
+                            total_reward += r2
+                            if t2 or tr2: done = True; break
+                        if not done:
+                            obs, sr2, done, info = reader.wait_for_landing(40)
+                            total_reward += sr2
+                    state = reader.read_state(obs, info) if not done else state
+                    row, col = state.qbert if state.qbert else (0, 0)
+                    continue
+                if using_disc: discs_available.discard((row, col))
+                if state.qbert: row, col = state.qbert
+                prev_lives = state.lives
+                if cubes_colored >= NUM_CUBES:
+                    level += 1
+                    discs_available = set(DISCS.keys())
+                    reader.set_level(level)
+                    if not done:
+                        obs, extra_r, done, info = reader.wait_for_level_start()
+                        total_reward += extra_r
+                    state = reader.read_state(obs, info) if not done else state
+                    if not done and state.lives < prev_lives:
+                        prev_lives = state.lives
+                        for _ in range(50):
+                            obs, r2, t2, tr2, info = env.step(0)
+                            total_reward += r2
+                            if t2 or tr2: done = True; break
+                        if not done:
+                            obs, sr2, done, info = reader.wait_for_landing(40)
+                            total_reward += sr2
+                        state = reader.read_state(obs, info) if not done else state
+                    row, col = state.qbert if (not done and state.qbert) else (0, 0)
+                    cube_done = reader.read_cube_done()
+                    prev_cubes_colored = reader.count_done_cubes()
+                    jump_count = 0
+            env.step = orig_step  # restore rendering
+            print(f"Reached level {level}, lives: {state.lives}, score: {total_reward:.0f}")
 
         if episode == 1:
             print("Q*bert Agent (RAM + disc + peel routing)")
