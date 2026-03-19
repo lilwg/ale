@@ -263,13 +263,20 @@ def bfs_peel_route(row, col, cube_done, blocked=set()):
 def pick_action(row, col, cube_done, state, discs_available, level=1):
     coily = state.coily
 
-    # Danger zone: all enemies from RAM + their neighbors
-    # (RAM detection catches red balls, Coily, and other lethal enemies)
+    # Danger zone: all enemies from RAM + their neighbors + predicted next positions
+    # Enemies bounce DOWN the pyramid, so also block one row below each enemy
     danger = set()
     for epos in state.enemies:
         danger.add(epos)
         for _, nr, nc in neighbors(epos[0], epos[1]):
             danger.add((nr, nc))
+        # Predict next bounce: enemies move DOWN (row+1), so block 2 rows ahead
+        for _, nr, nc in neighbors(epos[0], epos[1]):
+            if nr > epos[0]:  # downward neighbor
+                danger.add((nr, nc))
+                for _, nnr, nnc in neighbors(nr, nc):
+                    if nnr > nr:  # 2 rows down
+                        danger.add((nnr, nnc))
     # Ensure Coily (pixel-detected, most reliable) is always in danger
     if coily:
         danger.add(coily)

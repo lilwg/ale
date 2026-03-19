@@ -160,10 +160,10 @@ class QbertStateReader:
         self._cube_start_values = {(r, c): int(ram[addr])
                                     for (r, c), addr in CUBE_RAM.items()}
 
-    def wait_for_level_start(self, max_frames=200):
-        """Wait for level transition: skip animation until Q*bert lands at (0,0).
-        Uses a two-phase approach: first wait for Q*bert to leave (0,0) during
-        celebration, then wait for Q*bert to return to (0,0) for the new level.
+    def wait_for_level_start(self, max_frames=150):
+        """Wait for level transition until Q*bert returns to (0,0) for new level.
+        Two-phase: wait for Q*bert to leave (0,0) during celebration,
+        then wait for return. Kept short to avoid enemy deaths during wait.
         Returns (obs, total_reward, done, info)."""
         total_r = 0
         obs = None
@@ -183,8 +183,8 @@ class QbertStateReader:
                 found_top = 0
             elif left_top:
                 found_top += 1
-                if found_top >= 3:
-                    break  # Q*bert left and returned to (0,0) — new level
+                if found_top >= 2:
+                    break  # Q*bert returned to (0,0) — new level started
         return obs, total_r, done, info
 
     def read_cube_done(self):
