@@ -659,25 +659,29 @@ def run():
                 if is_valid(nr, nc):
                     row, col = nr, nc
 
-            # LOG CUBE PROGRESS
+            # LOG: always log every move for debugging
+            cs = f" C={state.coily}" if state.coily else ""
+            ds = f" discs={len(discs_available)}" if discs_available else ""
+            tgt = f" tgt={reader._cube_target_color}" if reader._cube_target_color else " tgt=?"
             if cubes_colored > prev_cubes_colored:
-                cs = ""
-                if state.coily:
-                    d = grid_distance(row, col, state.coily[0], state.coily[1])
-                    cs = f" C={state.coily} d={d}"
-                ds = f" discs={len(discs_available)}" if discs_available else ""
                 pl = f" peel={PEEL_LAYERS[(row,col)]}" if level >= 3 else ""
-                print(f"  #{jump_count:3d} {move_name:>11s}->({row},{col}) cubes:{cubes_colored:2d}/{NUM_CUBES} score:{total_reward:.0f}{cs}{ds}{pl}")
+                print(f"  #{jump_count:3d} {move_name:>11s}->({row},{col}) cubes:{cubes_colored:2d}/{NUM_CUBES} score:{total_reward:.0f}{cs}{ds}{pl}{tgt}")
+            elif jump_count % 5 == 0 or cubes_colored < prev_cubes_colored:
+                print(f"  #{jump_count:3d} {move_name:>11s}->({row},{col}) cubes:{cubes_colored}/{NUM_CUBES} score:{total_reward:.0f} r={jump_reward:.0f}{cs}{tgt}")
             elif cubes_colored < prev_cubes_colored and level >= 3:
                 print(f"  #{jump_count:3d} REVERTED ({row},{col}) cubes:{cubes_colored}/{NUM_CUBES}")
             prev_cubes_colored = cubes_colored
 
-            # LEVEL COMPLETE: detect from game state, not our cube count.
-            # The game pulls Q*bert off the pyramid for the celebration animation.
-            # If position went invalid after our last action, level is truly complete.
+            # LEVEL COMPLETE: detect from game signals.
+            # Method 1: Q*bert pulled off pyramid (position invalid) during celebration.
+            # Method 2: Large score jump (level bonus > 1000 points in one step).
+            # Method 3: Q*bert at (0,0) with high reward (landed on new level).
             pos_after = reader.read_qbert_position()
-            game_level_complete = (pos_after is None and state.lives >= prev_lives
-                                   and jump_reward > 0)
+            game_level_complete = (
+                (pos_after is None and state.lives >= prev_lives and jump_reward > 0)
+                or (jump_reward >= 1000 and not using_disc)
+                or (pos_after == (0, 0) and jump_reward >= 500 and row != 0)
+            )
 
             if game_level_complete:
                 print(f"\n  === LEVEL {level} COMPLETE! Score: {total_reward:.0f} ===\n")
