@@ -141,7 +141,7 @@ class QbertStateReader:
         values = [int(ram[addr]) for addr in CUBE_RAM.values()]
         self._cube_initial_color = max(set(values), key=values.count)
 
-    def wait_for_cubes_reset(self, anim_frames=120, max_settle_frames=150):
+    def wait_for_cubes_reset(self, anim_frames=140, max_settle_frames=160):
         """Wait for level transition: skip flashing animation, then wait for cubes to settle.
         Returns (obs, total_reward, done, info)."""
         total_r = 0
@@ -157,7 +157,8 @@ class QbertStateReader:
                 break
         if done:
             return obs, total_r, done, info
-        # Phase 2: wait for cubes to all show the same color (stable for 3 frames)
+        # Phase 2: wait for ALL 21 cubes to show the same color, stable for 5+ frames.
+        # Must require all 21 (not 20) to avoid triggering during flash animations.
         stable_color = None
         stable_count = 0
         for _ in range(max_settle_frames):
@@ -168,20 +169,22 @@ class QbertStateReader:
                 break
             ram = self.env.unwrapped.ale.getRAM()
             values = [int(ram[addr]) for addr in CUBE_RAM.values()]
-            most_common = max(set(values), key=values.count)
-            if values.count(most_common) >= 20 and most_common == stable_color:
-                stable_count += 1
-            elif values.count(most_common) >= 20:
-                stable_color = most_common
-                stable_count = 1
+            unique = set(values)
+            if len(unique) == 1:
+                color = values[0]
+                if color == stable_color:
+                    stable_count += 1
+                else:
+                    stable_color = color
+                    stable_count = 1
+                if stable_count >= 5:
+                    self._cube_initial_color = stable_color
+                    break
             else:
                 stable_color = None
                 stable_count = 0
-            if stable_count >= 3:
-                self._cube_initial_color = stable_color
-                break
         if stable_color is None:
-            # Fallback: use majority vote
+            # Fallback: use majority vote (some cubes may differ due to Q*bert landing)
             self.detect_cube_initial_color()
         return obs, total_r, done, info
 

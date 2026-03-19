@@ -89,6 +89,42 @@ def predict_coily_move(cr, cc, qr, qc):
     return best
 
 
+def simulate_coily(coily, qbert_path):
+    """Simulate Coily chasing Q*bert over multiple steps.
+    qbert_path is a list of (row, col) positions Q*bert will visit.
+    Returns list of Coily positions after each step."""
+    cr, cc = coily
+    positions = []
+    for qr, qc in qbert_path:
+        cr, cc = predict_coily_move(cr, cc, qr, qc)
+        positions.append((cr, cc))
+    return positions
+
+
+def count_escape_routes(row, col, coily):
+    """Count how many safe moves exist from a position (considering Coily)."""
+    count = 0
+    for _, nr, nc in neighbors(row, col):
+        if coily and (nr, nc) == coily:
+            continue
+        if coily:
+            pcr, pcc = predict_coily_move(coily[0], coily[1], nr, nc)
+            if (pcr, pcc) == (nr, nc):
+                continue
+        count += 1
+    return count
+
+
+def coily_can_reach(coily, target):
+    """Check if Coily is on target or adjacent to it (can reach in 1 step)."""
+    if coily == target:
+        return True
+    for _, nr, nc in neighbors(coily[0], coily[1]):
+        if (nr, nc) == target:
+            return True
+    return False
+
+
 def is_move_safe(row, col, action, coily):
     dr, dc, _ = MOVES[action]
     nr, nc = row + dr, col + dc
@@ -96,8 +132,10 @@ def is_move_safe(row, col, action, coily):
         return nr, nc, coily, False
     if coily is None:
         return nr, nc, None, True
+    # Unsafe if Coily is on the destination
     if (coily[0], coily[1]) == (nr, nc):
         return nr, nc, coily, False
+    # Unsafe if Coily's predicted chase move lands on destination
     pcr, pcc = predict_coily_move(coily[0], coily[1], nr, nc)
     safe = (pcr, pcc) != (nr, nc)
     return nr, nc, (pcr, pcc), safe
@@ -111,6 +149,8 @@ def has_safe_followup(row, col, action, coily):
     for _, nnr, nnc in neighbors(nr, nc):
         if predicted_coily is None:
             return True
+        if (predicted_coily[0], predicted_coily[1]) == (nnr, nnc):
+            continue
         pcr, pcc = predict_coily_move(predicted_coily[0], predicted_coily[1], nnr, nnc)
         if (pcr, pcc) != (nnr, nnc):
             return True
@@ -202,29 +242,25 @@ def bfs_peel_route(row, col, cube_done, blocked=set()):
 
 def pick_action(row, col, cube_done, state, discs_available, level=1):
     coily = state.coily
-    green = state.green
 
-    # Danger zone: enemies + their neighbors
+    # Danger zone: Coily + neighbors (green enemies are harmless — ignore them)
     danger = set()
     if coily:
         danger.add(coily)
         for _, nr, nc in neighbors(coily[0], coily[1]):
             danger.add((nr, nc))
-    if green:
-        danger.add(green)
-        for _, nr, nc in neighbors(green[0], green[1]):
-            danger.add((nr, nc))
 
     coily_dist = grid_distance(row, col, coily[0], coily[1]) if coily else 99
 
-    # Pre-compute safe moves with 2-hop lookahead
+    # Pre-compute safe moves with 2-hop lookahead + escape route scoring
     valid_moves = []
     for action, nr, nc in neighbors(row, col):
         _, _, predicted_coily, safe = is_move_safe(row, col, action, coily)
         followup = has_safe_followup(row, col, action, coily) if safe else False
-        valid_moves.append((action, nr, nc, safe, predicted_coily, followup))
-    safe_moves = [(a, nr, nc, pc) for a, nr, nc, s, pc, _ in valid_moves if s]
-    safe_with_followup = [(a, nr, nc, pc) for a, nr, nc, s, pc, f in valid_moves if s and f]
+        escapes = count_escape_routes(nr, nc, predicted_coily if safe else coily)
+        valid_moves.append((action, nr, nc, safe, predicted_coily, followup, escapes))
+    safe_moves = [(a, nr, nc, pc, esc) for a, nr, nc, s, pc, _, esc in valid_moves if s]
+    safe_with_followup = [(a, nr, nc, pc, esc) for a, nr, nc, s, pc, f, esc in valid_moves if s and f]
 
     # Count remaining cubes
     cubes_remaining = sum(
@@ -239,33 +275,70 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
             if safe:
                 return action
 
-    # DISC: fire when in real danger (no safe followup) and Coily close
-    if coily and discs_available and (row, col) in discs_available:
-        if not safe_moves or (coily_dist <= 2 and not safe_with_followup):
+    # --- DISC LURE STRATEGY ---
+    # When Coily is active and a disc is available, try to lure Coily to disc for a kill.
+    # Fire disc only when Coily is close enough to follow us off the edge.
+    if coily and discs_available:
+        on_disc = (row, col) in discs_available
+
+        # Fire disc: Coily adjacent (guaranteed kill) or truly cornered
+        if on_disc and (coily_dist <= 1 or not safe_with_followup):
             return DISCS[(row, col)]
 
-    # DISC: navigate toward disc when in danger (no safe followup)
-    if coily and discs_available and not safe_with_followup and coily_dist <= 3:
-        target_disc = min(discs_available, key=lambda d: grid_distance(row, col, d[0], d[1]))
-        if (row, col) != target_disc:
-            for blocked_set in [danger, set()]:
-                action = bfs_path_to(row, col, target_disc[0], target_disc[1], blocked_set)
-                if action is not None:
-                    _, _, _, safe = is_move_safe(row, col, action, coily)
-                    if safe:
-                        return action
+        # Lure mode: navigate toward disc when Coily is active
+        # Pick the disc that's closest to BOTH us and Coily (best lure path)
+        if coily_dist <= 5:
+            best_disc = min(discs_available,
+                key=lambda d: grid_distance(row, col, d[0], d[1])
+                            + grid_distance(coily[0], coily[1], d[0], d[1]) * 0.3)
+            disc_dist = grid_distance(row, col, best_disc[0], best_disc[1])
 
-    # FLEE: Coily close — prefer moves with safe followup (anti-cornering)
-    if coily and coily_dist <= 4:
-        flee_moves = safe_with_followup if safe_with_followup else safe_moves
-        if flee_moves:
+            # If we're cornered (no safe followup) or Coily is very close, prioritize disc
+            if not safe_with_followup or (coily_dist <= 2 and disc_dist <= 2):
+                if (row, col) != best_disc:
+                    for blocked_set in [danger, set()]:
+                        action = bfs_path_to(row, col, best_disc[0], best_disc[1], blocked_set)
+                        if action is not None:
+                            _, _, _, safe = is_move_safe(row, col, action, coily)
+                            if safe:
+                                return action
+
+    # FLEE + ROUTE: unified scoring when Coily is present
+    if coily and coily_dist <= 5:
+        # Score all safe moves by combined value
+        candidates = safe_with_followup if safe_with_followup else safe_moves
+        if candidates:
             best_action = None
-            best_score = -999
-            for action, nr, nc, pc in flee_moves:
+            best_score = -9999
+            for entry in candidates:
+                action, nr, nc, pc = entry[0], entry[1], entry[2], entry[3]
+                esc = entry[4]
                 d = grid_distance(nr, nc, pc[0], pc[1]) if pc else 99
-                bonus = 3 if not cube_done[nr][nc] else 0
-                penalty = -5 if (nr, nc) in danger else 0
-                score = d + bonus + penalty
+
+                # Safety: distance from Coily + escape routes
+                # Heavy penalty for moving adjacent to Coily (timing-unsafe on fast levels)
+                coily_adjacent = coily_can_reach(coily, (nr, nc))
+                safety = d * 2 + esc * 3 + (-20 if coily_adjacent else 0)
+
+                # Productivity: prefer uncolored cubes
+                cube_val = 5 if not cube_done[nr][nc] else 0
+                # Penalty for reverting done cubes on toggle levels
+                if level >= 3 and cube_done[nr][nc]:
+                    cube_val = -8
+
+                # Avoid dead ends: heavy penalty for corners/bottom with few escapes
+                dead_end_penalty = -15 if esc == 0 else (-8 if esc == 1 else 0)
+
+                # Disc proximity bonus when luring
+                disc_bonus = 0
+                if discs_available and coily_dist <= 4:
+                    nearest_disc = min(discs_available,
+                        key=lambda d_pos: grid_distance(nr, nc, d_pos[0], d_pos[1]))
+                    if grid_distance(nr, nc, nearest_disc[0], nearest_disc[1]) < \
+                       grid_distance(row, col, nearest_disc[0], nearest_disc[1]):
+                        disc_bonus = 3
+
+                score = safety + cube_val + dead_end_penalty + disc_bonus
                 if score > best_score:
                     best_score = score
                     best_action = action
@@ -278,11 +351,21 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     for blocked_set in [danger, set()]:
         action = route_fn(row, col, cube_done, blocked_set)
         if action is not None:
-            _, _, _, safe = is_move_safe(row, col, action, coily)
-            if safe:
+            nr, nc, _, safe = is_move_safe(row, col, action, coily)
+            # Also reject moves adjacent to Coily (timing-unsafe on fast levels)
+            if safe and not (coily and coily_can_reach(coily, (nr, nc))):
                 return action
 
-    # All done or stuck: flee or use disc
+    # Last resort: any safe move maximizing distance from Coily
+    if safe_moves:
+        if coily:
+            best = max(safe_moves, key=lambda x: (
+                grid_distance(x[1], x[2], coily[0], coily[1]) * 2 + x[4]
+            ))
+            return best[0]
+        return safe_moves[0][0]
+
+    # Emergency: use disc if available
     if coily and discs_available:
         target_disc = min(discs_available, key=lambda d: grid_distance(row, col, d[0], d[1]))
         if (row, col) == target_disc:
@@ -291,11 +374,6 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
         if action is not None:
             return action
 
-    if safe_moves:
-        if coily:
-            best = max(safe_moves, key=lambda x: grid_distance(x[1], x[2], coily[0], coily[1]))
-            return best[0]
-        return safe_moves[0][0]
     if valid_moves:
         if coily:
             best = max(valid_moves, key=lambda x: grid_distance(x[1], x[2], coily[0], coily[1]))
