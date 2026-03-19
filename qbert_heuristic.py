@@ -308,27 +308,25 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
             if safe:
                 return action
 
-    # --- DISC LURE STRATEGY ---
-    # When Coily is active and a disc is available, try to lure Coily to disc for a kill.
-    # Fire disc only when Coily is close enough to follow us off the edge.
-    if coily and discs_available:
+    # --- DISC STRATEGY ---
+    # Only use discs against Coily (snake form, actively chasing).
+    # The ball form bounces from the top — don't waste discs on it.
+    # Heuristic: Coily (snake) is typically at row >= 3 when chasing.
+    coily_is_snake = coily and coily[0] >= 3
+    if coily_is_snake and discs_available:
         on_disc = (row, col) in discs_available
 
-        # Fire disc: only when Coily is adjacent (guaranteed kill)
-        # or zero safe moves at all (truly cornered, last resort)
-        if on_disc and (coily_dist <= 1 or not safe_moves):
+        # Fire disc ONLY when Coily is adjacent — guaranteed kill
+        if on_disc and coily_dist <= 1:
             return DISCS[(row, col)]
 
-        # Lure mode: navigate toward disc when Coily is active
-        # Pick the disc that's closest to BOTH us and Coily (best lure path)
-        if coily_dist <= 5:
+        # Lure mode: navigate toward disc when Coily is close and chasing
+        if coily_dist <= 3:
             best_disc = min(discs_available,
-                key=lambda d: grid_distance(row, col, d[0], d[1])
-                            + grid_distance(coily[0], coily[1], d[0], d[1]) * 0.3)
+                key=lambda d: grid_distance(row, col, d[0], d[1]))
             disc_dist = grid_distance(row, col, best_disc[0], best_disc[1])
 
-            # If we're cornered (no safe followup) or Coily is very close, prioritize disc
-            if not safe_with_followup or (coily_dist <= 2 and disc_dist <= 2):
+            if not safe_with_followup and disc_dist <= 3:
                 if (row, col) != best_disc:
                     for blocked_set in [danger, set()]:
                         action = bfs_path_to(row, col, best_disc[0], best_disc[1], blocked_set)
@@ -403,8 +401,8 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
             return best[0]
         return safe_moves[0][0]
 
-    # Emergency: use disc if available
-    if coily and discs_available:
+    # Emergency: use disc if Coily snake is active and we're truly stuck
+    if coily_is_snake and discs_available:
         target_disc = min(discs_available, key=lambda d: grid_distance(row, col, d[0], d[1]))
         if (row, col) == target_disc:
             return DISCS[(row, col)]
@@ -460,8 +458,11 @@ def run():
             if action == NOOP:
                 action = DOWN
 
-            # Safety gate: verify the action leads to a valid position
-            # (disc actions intentionally go off-board, so allow those)
+            # Safety gate: re-read actual position from RAM and verify the action
+            # leads to a valid position (prevents drift from causing falls)
+            actual_pos = reader.read_qbert_position()
+            if actual_pos:
+                row, col = actual_pos  # Correct any drift
             using_disc = (row, col) in discs_available and action == DISCS.get((row, col))
             if not using_disc and action in MOVES:
                 dr, dc, _ = MOVES[action]
