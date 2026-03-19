@@ -210,14 +210,18 @@ class QbertStateReader:
         return obs, total_r, done, info
 
     def learn_target_color(self, qbert_pos):
-        """Called when Q*bert gets 25 reward — read the cube color at Q*bert's
-        position to learn the target color for this level."""
+        """Called when Q*bert colors a cube — read the cube color at Q*bert's
+        position to learn the target color for this level.
+        Only learns if the value differs from the baseline (actual color change)."""
         if qbert_pos and self._cube_target_color is None:
             r, c = qbert_pos
             addr = CUBE_RAM.get((r, c))
-            if addr is not None:
+            if addr is not None and self._cube_start_values is not None:
                 ram = self.env.unwrapped.ale.getRAM()
-                self._cube_target_color = int(ram[addr])
+                val = int(ram[addr])
+                baseline_val = self._cube_start_values.get((r, c))
+                if val != baseline_val:
+                    self._cube_target_color = val
 
     def read_cube_done(self):
         """Read cube done/not-done state from RAM.

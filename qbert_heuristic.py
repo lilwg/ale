@@ -614,8 +614,9 @@ def run():
             jump_count += 1
             state = reader.read_state(obs, info, jump_reward, done)
 
-            # Learn target color from 25-point cube rewards
-            if jump_reward >= 25 and state.qbert:
+            # Learn target color: only from cube coloring (not disc kills/bonuses).
+            # A cube was colored if the cube at Q*bert's position changed from baseline.
+            if jump_reward > 0 and state.qbert and not using_disc:
                 reader.learn_target_color(state.qbert)
 
             # Re-read cubes from RAM after landing
