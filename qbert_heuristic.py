@@ -614,11 +614,6 @@ def run():
             jump_count += 1
             state = reader.read_state(obs, info, jump_reward, done)
 
-            # Learn target color: only from cube coloring (not disc kills/bonuses).
-            # A cube was colored if the cube at Q*bert's position changed from baseline.
-            if jump_reward > 0 and state.qbert and not using_disc:
-                reader.learn_target_color(state.qbert)
-
             # Re-read cubes from RAM after landing
             cube_done = reader.read_cube_done()
             cubes_colored = reader.count_done_cubes()
@@ -650,7 +645,8 @@ def run():
                 prev_cubes_colored = cubes_colored
                 continue
 
-            # UPDATE POSITION
+            # UPDATE POSITION (save previous for level transition detection)
+            prev_row, prev_col = row, col
             if state.qbert:
                 row, col = state.qbert
             else:
@@ -672,38 +668,22 @@ def run():
                 print(f"  #{jump_count:3d} REVERTED ({row},{col}) cubes:{cubes_colored}/{NUM_CUBES}")
             prev_cubes_colored = cubes_colored
 
-            # LEVEL COMPLETE: detect from game signals.
-            # 1. Q*bert position goes invalid (celebration animation)
-            # 2. Q*bert teleports to (0,0) unexpectedly
-            # 3. Cubes reset: most cubes suddenly at a uniform non-target color
-            pos_after = reader.read_qbert_position()
-            game_level_complete = False
-
-            if pos_after is None and state.lives >= prev_lives and jump_reward > 0:
-                game_level_complete = True
-            elif pos_after == (0, 0) and (row, col) != (0, 0) and not using_disc and state.lives >= prev_lives:
-                game_level_complete = True
-
-            # Detect level reset: if cubes suddenly mostly uniform at a non-target color
-            if not game_level_complete and reader._cube_target_color is not None:
-                ram = env.unwrapped.ale.getRAM()
-                vals = [int(ram[addr]) for addr in CUBE_RAM.values()]
-                most_common = max(set(vals), key=vals.count)
-                if most_common != reader._cube_target_color and vals.count(most_common) >= 18:
-                    game_level_complete = True
-                    print(f"  ** Level reset detected: cubes mostly at {most_common}, target was {reader._cube_target_color}")
-
-            if game_level_complete:
+            # LEVEL COMPLETE: baseline says 21/21 cubes changed.
+            # Also detect teleport to (0,0) for multi-hit levels where
+            # baseline hits 21 before game completes.
+            teleported = ((row, col) == (0, 0) and (prev_row, prev_col) != (0, 0)
+                          and not using_disc and state.lives >= prev_lives)
+            if cubes_colored >= NUM_CUBES or teleported:
                 print(f"\n  === LEVEL {level} COMPLETE! Score: {total_reward:.0f} ===\n")
                 level += 1
                 jump_count = 0
                 prev_lives = state.lives
                 discs_available = set(DISCS.keys())
-                reader.set_level(level)  # sets color cycle
                 if not done:
                     # Spam first move until level starts — baseline captured inside
                     obs, extra_r, done, info = reader.wait_for_level_start()
                     total_reward += extra_r
+                reader.set_level(level)  # snapshot baseline AFTER transition
                 state = reader.read_state(obs, info) if not done else state
                 # Handle death during level transition
                 if not done and state.lives < prev_lives:

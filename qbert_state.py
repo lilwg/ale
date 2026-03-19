@@ -209,47 +209,26 @@ class QbertStateReader:
             total_r += r
         return obs, total_r, done, info
 
-    def learn_target_color(self, qbert_pos):
-        """Called when Q*bert colors a cube — read the cube color at Q*bert's
-        position to learn the target color for this level.
-        Only learns if the value differs from the baseline (actual color change)."""
-        if qbert_pos and self._cube_target_color is None:
-            r, c = qbert_pos
-            addr = CUBE_RAM.get((r, c))
-            if addr is not None and self._cube_start_values is not None:
-                ram = self.env.unwrapped.ale.getRAM()
-                val = int(ram[addr])
-                baseline_val = self._cube_start_values.get((r, c))
-                if val != baseline_val:
-                    self._cube_target_color = val
-                    print(f"  ** Learned target color: {val} at ({r},{c}), baseline was {baseline_val}")
-
     def read_cube_done(self):
-        """Read cube done/not-done state from RAM.
-        If target color is known: done = (value == target).
-        Otherwise falls back to baseline change detection."""
+        """Read cube done/not-done state from RAM using per-cube baseline.
+        A cube is 'done' when its value CHANGES from the level-start baseline."""
         ram = self.env.unwrapped.ale.getRAM()
         cube_done = [[False] * (r + 1) for r in range(MAX_ROW + 1)]
-        if self._cube_target_color is not None:
-            # Target-based: works for all level types including multi-hit
-            for (r, c), addr in CUBE_RAM.items():
-                cube_done[r][c] = (int(ram[addr]) == self._cube_target_color)
-        elif self._cube_start_values is not None:
-            # Fallback: baseline change detection (before first 25pt reward)
-            for (r, c), addr in CUBE_RAM.items():
-                cube_done[r][c] = (int(ram[addr]) != self._cube_start_values[(r, c)])
+        baseline = self._cube_start_values
+        if baseline is None:
+            return cube_done
+        for (r, c), addr in CUBE_RAM.items():
+            cube_done[r][c] = (int(ram[addr]) != baseline[(r, c)])
         return cube_done
 
     def count_done_cubes(self):
-        """Count completed cubes from RAM."""
+        """Count completed cubes from RAM using per-cube baseline."""
         ram = self.env.unwrapped.ale.getRAM()
-        if self._cube_target_color is not None:
-            return sum(1 for addr in CUBE_RAM.values()
-                       if int(ram[addr]) == self._cube_target_color)
-        elif self._cube_start_values is not None:
-            return sum(1 for (r, c), addr in CUBE_RAM.items()
-                       if int(ram[addr]) != self._cube_start_values[(r, c)])
-        return 0
+        baseline = self._cube_start_values
+        if baseline is None:
+            return 0
+        return sum(1 for (r, c), addr in CUBE_RAM.items()
+                   if int(ram[addr]) != baseline[(r, c)])
 
     def read_qbert_position(self):
         """Read Q*bert's grid position directly from RAM. Instant."""
