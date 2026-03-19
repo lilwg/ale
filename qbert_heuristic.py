@@ -668,12 +668,8 @@ def run():
                 print(f"  #{jump_count:3d} REVERTED ({row},{col}) cubes:{cubes_colored}/{NUM_CUBES}")
             prev_cubes_colored = cubes_colored
 
-            # LEVEL COMPLETE: baseline says 21/21 cubes changed.
-            # Also detect teleport to (0,0) for multi-hit levels where
-            # baseline hits 21 before game completes.
-            teleported = ((row, col) == (0, 0) and (prev_row, prev_col) != (0, 0)
-                          and not using_disc and state.lives >= prev_lives)
-            if cubes_colored >= NUM_CUBES or teleported:
+            # LEVEL COMPLETE: baseline says 21/21 cubes changed
+            if cubes_colored >= NUM_CUBES:
                 print(f"\n  === LEVEL {level} COMPLETE! Score: {total_reward:.0f} ===\n")
                 level += 1
                 jump_count = 0
