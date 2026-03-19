@@ -471,6 +471,7 @@ def run():
         jump_count = 0
         discs_available = set(DISCS.keys())
         prev_cubes_colored = reader.count_done_cubes()
+        did_resnapshot = False  # only re-snapshot once per level for two-hit detection
 
         # Skip to target level by playing earlier levels without rendering
         if start_level > 1 and level < start_level:
@@ -555,7 +556,9 @@ def run():
             # Two-hit level detection: if all cubes read as "done" but the game
             # hasn't completed the level, cubes need a second hit. Re-snapshot
             # the baseline from current values to start the second pass.
-            if cubes_colored >= NUM_CUBES:
+            if cubes_colored >= NUM_CUBES and not did_resnapshot:
+                did_resnapshot = True
+                print(f"  ** Re-snapshot: cubes={cubes_colored}/21 on L{level}, resetting baseline for 2nd pass")
                 reader.set_level(level)  # re-snapshots baseline from current values
                 cube_done = reader.read_cube_done()
                 cubes_colored = reader.count_done_cubes()
@@ -567,6 +570,7 @@ def run():
 
             action = pick_action(row, col, cube_done, state, discs_available, level)
             if action == NOOP:
+                print(f"  !! STUCK: pos=({row},{col}) cubes={cubes_colored}/21 L{level} C={state.coily} E={state.enemies}")
                 # Don't blindly default to DOWN — pick a safe valid move
                 for alt_action, _, _ in neighbors(row, col):
                     action = alt_action
@@ -664,6 +668,7 @@ def run():
                 jump_count = 0
                 prev_lives = state.lives
                 discs_available = set(DISCS.keys())
+                did_resnapshot = False
                 reader.set_level(level)  # sets color cycle
                 if not done:
                     # Spam first move until level starts — baseline captured inside
