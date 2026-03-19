@@ -460,6 +460,14 @@ def run():
             cube_done = reader.read_cube_done()
             cubes_colored = reader.count_done_cubes()
 
+            # Two-hit level detection: if all cubes read as "done" but the game
+            # hasn't completed the level, cubes need a second hit. Re-snapshot
+            # the baseline from current values to start the second pass.
+            if cubes_colored >= NUM_CUBES:
+                reader.set_level(level)  # re-snapshots baseline from current values
+                cube_done = reader.read_cube_done()
+                cubes_colored = reader.count_done_cubes()
+
             action = pick_action(row, col, cube_done, state, discs_available, level)
             if action == NOOP:
                 action = DOWN
