@@ -853,7 +853,6 @@ def run():
                 # After multi-hit levels: use majority cube value as target
                 # (carry-over cubes at the majority value are already "done")
                 if _prev_level_was_multi_hit:
-                    from collections import Counter
                     ram = env.unwrapped.ale.getRAM()
                     vals = [int(ram[addr]) for addr in CUBE_RAM.values()]
                     majority = Counter(vals).most_common(1)[0][0]
