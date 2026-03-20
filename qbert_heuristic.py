@@ -289,7 +289,8 @@ def bfs_peel_route(row, col, cube_done, blocked=set()):
 
 
 _no_progress_count = 0
-_route_target = None  # committed routing target (row, col)
+_route_target = None
+_on_second_pass = False
 
 def pick_action(row, col, cube_done, state, discs_available, level=1):
     global _no_progress_count, _route_target
@@ -431,8 +432,9 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
             if best_action is not None:
                 return best_action
 
-    # ROUTE
-    route_fn = bfs_peel_route if level >= 3 else bfs_nearest_undone
+    # ROUTE: use simple BFS on multi-hit second pass (peel routing's done-cube
+    # penalty causes agent to skip nearby undone cubes on second pass)
+    route_fn = bfs_peel_route if (level >= 3 and not _on_second_pass) else bfs_nearest_undone
     blocked_options = [danger, set()]
     for blocked_set in blocked_options:
         action = route_fn(row, col, cube_done, blocked_set)
@@ -725,6 +727,10 @@ def run():
                 _no_progress_count = 0
             else:
                 _no_progress_count += 1
+                if _no_progress_count == 10:
+                    undone = [(r,c) for r in range(MAX_ROW+1) for c in range(r+1)
+                              if not cube_done[r][c]]
+                    print(f"  !! STUCK 10 jumps: undone={undone} pos=({row},{col})")
             prev_cubes_colored = cubes_colored
 
             # LEVEL COMPLETE: baseline says 21/21 cubes changed.
@@ -751,7 +757,8 @@ def run():
                     state = reader.read_state(obs_c, info_c)
                 if not game_confirmed and not done:
                     # Multi-hit level: re-snapshot baseline for next pass
-                    print(f"  ** Multi-hit: re-snapshot for next pass")
+                    _on_second_pass = True
+                    print(f"  ** Multi-hit: re-snapshot for next pass (using BFS)")
                     reader.set_level(level)
                     cube_done = reader.read_cube_done()
                     prev_cubes_colored = reader.count_done_cubes()
@@ -765,6 +772,7 @@ def run():
             if game_confirmed:
                 print(f"\n  === LEVEL {level} COMPLETE! Score: {total_reward:.0f} ===\n")
                 level += 1
+                _on_second_pass = False
                 jump_count = 0
                 prev_lives = state.lives
                 discs_available = set(DISCS.keys())
