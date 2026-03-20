@@ -295,19 +295,9 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     global _no_progress_count, _route_target
     coily = state.coily
 
-    # Danger zone: enemies + neighbors + predicted bounce path
+    # Danger zone: Coily only (pixel-detected, reliable).
+    # RAM entity slots have false positives that cause phantom danger zones.
     danger = set()
-    for epos in state.enemies:
-        danger.add(epos)
-        for _, nr, nc in neighbors(epos[0], epos[1]):
-            danger.add((nr, nc))
-        for _, nr, nc in neighbors(epos[0], epos[1]):
-            if nr > epos[0]:
-                danger.add((nr, nc))
-                for _, nnr, nnc in neighbors(nr, nc):
-                    if nnr > nr:
-                        danger.add((nnr, nnc))
-    # Ensure Coily (pixel-detected, most reliable) is always in danger
     if coily:
         danger.add(coily)
         for _, nr, nc in neighbors(coily[0], coily[1]):
@@ -426,17 +416,20 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
 
     # ROUTE
     route_fn = bfs_peel_route if level >= 3 else bfs_nearest_undone
-    # If stuck (no progress for many jumps), ignore danger zone to break out
-    if _no_progress_count >= 8:
-        blocked_options = [set()]
-    else:
-        blocked_options = [danger, set()]
+    blocked_options = [danger, set()]
     for blocked_set in blocked_options:
         action = route_fn(row, col, cube_done, blocked_set)
         if action is not None:
             _, _, _, safe = is_move_safe(row, col, action, coily)
             if safe:
                 return action
+    # Final fallback: route with basic safety (just don't step ON Coily)
+    action = route_fn(row, col, cube_done)
+    if action is not None:
+        dr, dc, _ = MOVES[action]
+        nr, nc = row + dr, col + dc
+        if not coily or (nr, nc) != coily:
+            return action
 
     # Last resort: any safe move maximizing distance from Coily
     if safe_moves:
