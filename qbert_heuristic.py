@@ -730,15 +730,20 @@ def run():
                 print(f"  #{jump_count:3d} {move_name:>11s}->({row},{col}) cubes:{cubes_colored}/{NUM_CUBES} score:{total_reward:.0f} r={jump_reward:.0f}{cs}{tgt}")
             elif cubes_colored < prev_cubes_colored and level >= 3:
                 print(f"  #{jump_count:3d} REVERTED ({row},{col}) cubes:{cubes_colored}/{NUM_CUBES}")
-            # Track stuck detection for routing
+            # Track stuck detection — if visiting "undone" cubes gives 0 reward,
+            # the baseline is wrong (carry-over). Re-snapshot to fix tracking.
             if cubes_colored > prev_cubes_colored:
                 _no_progress_count = 0
             else:
                 _no_progress_count += 1
-                if _no_progress_count == 20:
-                    undone = [(r,c) for r in range(MAX_ROW+1) for c in range(r+1)
-                              if not cube_done[r][c]]
-                    print(f"  !! STUCK 20 jumps: undone={undone} pos=({row},{col}) C={state.coily}")
+                # Re-snapshot when clearly wrong: 15+ no-progress jumps AND
+                # many "undone" cubes (>10) that give 0 reward — baseline mismatch
+                if (_no_progress_count >= 15 and cubes_remaining > 10
+                        and jump_reward == 0 and not _on_second_pass):
+                    print(f"  ** Tracking fix: re-snapshot ({cubes_remaining} undone, 0 reward)")
+                    reader.set_level(level)
+                    _on_second_pass = True
+                    _no_progress_count = 0
                     undone = [(r,c) for r in range(MAX_ROW+1) for c in range(r+1)
                               if not cube_done[r][c]]
                     print(f"  !! STUCK 10 jumps: undone={undone} pos=({row},{col}) C={state.coily} E={state.enemies} discs={len(discs_available)}")
