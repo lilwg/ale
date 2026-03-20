@@ -364,13 +364,12 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
             if best_wait is not None:
                 return best_wait
 
-        # Lure mode: navigate toward disc when Coily is close
-        if coily_dist <= 3:
-            best_disc = min(discs_available,
-                key=lambda d: grid_distance(row, col, d[0], d[1]))
-            disc_dist = grid_distance(row, col, best_disc[0], best_disc[1])
+        # Lure mode: navigate toward disc to kill Coily
+        best_disc = min(discs_available,
+            key=lambda d: grid_distance(row, col, d[0], d[1]))
+        disc_dist = grid_distance(row, col, best_disc[0], best_disc[1])
 
-            if not safe_with_followup and disc_dist <= 4:
+        if not safe_with_followup and disc_dist <= 4 and coily_dist <= 3:
                 if (row, col) != best_disc:
                     for blocked_set in [danger, set()]:
                         action = bfs_path_to(row, col, best_disc[0], best_disc[1], blocked_set)
@@ -807,11 +806,15 @@ def run():
                     obs, extra_r, done, info = reader.wait_for_level_start()
                     total_reward += extra_r
                 reader.set_level(level)  # snapshot baseline AFTER transition
-                # After multi-hit levels, use empty reward tracking
-                # (carry-over makes baseline unreliable — all cubes need fresh tracking)
+                # After multi-hit levels: use majority cube value as target
+                # (carry-over cubes at the majority value are already "done")
                 if _prev_level_was_multi_hit:
-                    reader._reward_done = set()  # enable reward tracking
-                    # DON'T set _on_second_pass — toggle levels need peel routing
+                    from collections import Counter
+                    ram = env.unwrapped.ale.getRAM()
+                    vals = [int(ram[addr]) for addr in CUBE_RAM.values()]
+                    majority = Counter(vals).most_common(1)[0][0]
+                    reader._cube_target_color = majority
+                    print(f"  ** L{level}: target={majority} from majority")
                     print(f"  ** L{level}: fresh tracking (post multi-hit)")
                 state = reader.read_state(obs, info) if not done else state
                 # Handle death during level transition
