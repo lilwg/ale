@@ -174,7 +174,7 @@ def is_move_safe(row, col, action, coily):
     # Unsafe if Coily is on the destination
     if (coily[0], coily[1]) == (nr, nc):
         return nr, nc, coily, False
-    # Check 2 steps of Coily movement + 3-step survival
+    # Check Coily's simultaneous move (step 1) and next move (step 2)
     step1_moves = predict_coily_moves(coily[0], coily[1], nr, nc)
     if (nr, nc) in step1_moves:
         return nr, nc, coily, False
@@ -340,8 +340,8 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     if cubes_remaining <= finish_threshold:
         action = bfs_nearest_undone(row, col, cube_done)
         if action is not None:
-            _, _, _, safe = is_move_safe(row, col, action, coily)
-            if safe:
+            nr, nc, pc, safe = is_move_safe(row, col, action, coily)
+            if safe and (not coily or survives_n_steps(nr, nc, pc, 3)):
                 return action
 
     # --- DISC STRATEGY ---
@@ -457,19 +457,7 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
                     nr, nc, pc, safe = is_move_safe(row, col, action, coily)
                     if safe and (not coily or survives_n_steps(nr, nc, pc, survival_depth)):
                         return action
-    # DEBUG: all survival-checked routes failed
-    if coily and '--debug' in sys.argv:
-        undone = [(r,c) for r in range(MAX_ROW+1) for c in range(r+1) if not cube_done[r][c]]
-        if undone:
-            print(f"    ROUTE FAIL: pos=({row},{col}) C={coily} undone={undone[:5]} danger={len(danger)}")
-            for fn in route_fns:
-                act = fn(row, col, cube_done)
-                if act:
-                    dr,dc,_ = MOVES[act]; nr,nc = row+dr, col+dc
-                    _,_,pc,s = is_move_safe(row,col,act,coily)
-                    sv = survives_n_steps(nr,nc,pc,3) if s else False
-                    print(f"      BFS->({nr},{nc}) safe={s} surv3={sv} in_danger={(nr,nc) in danger}")
-    # All routes fail survival — prioritize safety (flee away from Coily)
+    # All routes fail — prioritize safety (flee away from Coily)
     if coily and safe_moves:
         best = max(safe_moves, key=lambda x: (
             grid_distance(x[1], x[2], coily[0], coily[1]) * 3 + x[4]
@@ -501,6 +489,17 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
         action = bfs_path_to(row, col, target_disc[0], target_disc[1])
         if action is not None:
             return action
+
+    # Last-last resort: 1-step safety only (for levels where 2-step blocks everything)
+    for fn in route_fns:
+        action = fn(row, col, cube_done)
+        if action is not None:
+            dr, dc, _ = MOVES[action]
+            nr, nc = row + dr, col + dc
+            if not coily or (nr, nc) != coily:
+                step1 = predict_coily_moves(coily[0], coily[1], nr, nc) if coily else []
+                if (nr, nc) not in step1:
+                    return action
 
     if valid_moves:
         if coily:
