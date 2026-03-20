@@ -457,6 +457,18 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
                     nr, nc, pc, safe = is_move_safe(row, col, action, coily)
                     if safe and (not coily or survives_n_steps(nr, nc, pc, survival_depth)):
                         return action
+    # DEBUG: all survival-checked routes failed
+    if coily and '--debug' in sys.argv:
+        undone = [(r,c) for r in range(MAX_ROW+1) for c in range(r+1) if not cube_done[r][c]]
+        if undone:
+            print(f"    ROUTE FAIL: pos=({row},{col}) C={coily} undone={undone[:5]} danger={len(danger)}")
+            for fn in route_fns:
+                act = fn(row, col, cube_done)
+                if act:
+                    dr,dc,_ = MOVES[act]; nr,nc = row+dr, col+dc
+                    _,_,pc,s = is_move_safe(row,col,act,coily)
+                    sv = survives_n_steps(nr,nc,pc,3) if s else False
+                    print(f"      BFS->({nr},{nc}) safe={s} surv3={sv} in_danger={(nr,nc) in danger}")
     # All routes fail survival — prioritize safety (flee away from Coily)
     if coily and safe_moves:
         best = max(safe_moves, key=lambda x: (
