@@ -17,10 +17,10 @@ import sys
 import gymnasium as gym
 import ale_py
 import numpy as np
-from collections import deque
+from collections import deque, Counter
 
 from qbert_state import (
-    QbertStateReader, is_valid, MAX_ROW, NUM_CUBES,
+    QbertStateReader, is_valid, MAX_ROW, NUM_CUBES, CUBE_RAM,
 )
 
 gym.register_envs(ale_py)
