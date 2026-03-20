@@ -364,13 +364,13 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
             if best_wait is not None:
                 return best_wait
 
-        # Lure mode: navigate toward disc when Coily is close and chasing
+        # Lure mode: navigate toward disc when Coily is close
         if coily_dist <= 3:
             best_disc = min(discs_available,
                 key=lambda d: grid_distance(row, col, d[0], d[1]))
             disc_dist = grid_distance(row, col, best_disc[0], best_disc[1])
 
-            if not safe_with_followup and disc_dist <= 3:
+            if not safe_with_followup and disc_dist <= 4:
                 if (row, col) != best_disc:
                     for blocked_set in [danger, set()]:
                         action = bfs_path_to(row, col, best_disc[0], best_disc[1], blocked_set)
