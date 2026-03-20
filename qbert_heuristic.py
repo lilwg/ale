@@ -808,19 +808,27 @@ def run():
                     state = reader.read_state(obs_c, info_c)
                 if not game_confirmed and not done:
                     # Multi-hit level: use majority value as "undone" marker
-                    _on_second_pass = True
                     _prev_level_was_multi_hit = True
-                    from collections import Counter
                     ram = env.unwrapped.ale.getRAM()
                     vals = [int(ram[addr]) for addr in CUBE_RAM.values()]
                     majority = Counter(vals).most_common(1)[0][0]
-                    # Set ALL baseline values to the majority — cubes at majority = "undone"
-                    reader._cube_start_values = {(r, c): majority
-                                                  for (r, c) in CUBE_RAM.keys()}
-                    reader._cube_target_color = None
-                    reader._reward_done = None
                     done_count = sum(1 for v in vals if v != majority)
-                    print(f"  ** Multi-hit: second pass, majority={majority}, {done_count}/21 already done")
+                    if done_count > 0 and not _on_second_pass:
+                        # Re-snapshot with majority as baseline
+                        _on_second_pass = True
+                        reader._cube_start_values = {(r, c): majority
+                                                      for (r, c) in CUBE_RAM.keys()}
+                        reader._cube_target_color = None
+                        reader._reward_done = None
+                        print(f"  ** Multi-hit: majority={majority}, {done_count}/21 already done")
+                    else:
+                        # All cubes same value OR already on second pass —
+                        # switch to reward tracking (only count 25-reward cubes)
+                        reader._reward_done = set()
+                        reader._cube_target_color = None
+                        reader._cube_start_values = None
+                        _on_second_pass = True
+                        print(f"  ** Tracking reset: reward-based (all cubes at {majority})")
                     cube_done = reader.read_cube_done()
                     prev_cubes_colored = reader.count_done_cubes()
                     if state.qbert:
