@@ -226,11 +226,27 @@ class QbertStateReader:
             total_r += r
         return obs, total_r, done, info
 
+    def learn_target_color(self, qbert_pos):
+        """Learn the target color from a 25-point reward cube.
+        Only activates when reward tracking is enabled (post-multi-hit levels)."""
+        if qbert_pos and self._cube_target_color is None and self._reward_done is not None:
+            r, c = qbert_pos
+            addr = CUBE_RAM.get((r, c))
+            if addr is not None:
+                ram = self.env.unwrapped.ale.getRAM()
+                self._cube_target_color = int(ram[addr])
+                print(f"  ** Learned target color: {self._cube_target_color} at ({r},{c})")
+
     def read_cube_done(self):
-        """Read cube done/not-done state. Uses reward tracking if enabled,
-        otherwise falls back to RAM baseline comparison."""
+        """Read cube done/not-done state. Uses target color if known,
+        reward tracking if enabled, otherwise baseline comparison."""
         cube_done = [[False] * (r + 1) for r in range(MAX_ROW + 1)]
-        if self._reward_done is not None:
+        if self._cube_target_color is not None:
+            # Target-based: most reliable for toggle/multi-hit levels
+            ram = self.env.unwrapped.ale.getRAM()
+            for (r, c), addr in CUBE_RAM.items():
+                cube_done[r][c] = (int(ram[addr]) == self._cube_target_color)
+        elif self._reward_done is not None:
             for (r, c) in self._reward_done:
                 cube_done[r][c] = True
         elif self._cube_start_values is not None:
@@ -241,7 +257,11 @@ class QbertStateReader:
 
     def count_done_cubes(self):
         """Count completed cubes."""
-        if self._reward_done is not None:
+        if self._cube_target_color is not None:
+            ram = self.env.unwrapped.ale.getRAM()
+            return sum(1 for addr in CUBE_RAM.values()
+                       if int(ram[addr]) == self._cube_target_color)
+        elif self._reward_done is not None:
             return len(self._reward_done)
         elif self._cube_start_values is not None:
             ram = self.env.unwrapped.ale.getRAM()

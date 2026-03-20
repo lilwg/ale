@@ -679,9 +679,10 @@ def run():
             jump_count += 1
             state = reader.read_state(obs, info, jump_reward, done)
 
-            # Mark cube done by reward signal (for reward-based tracking)
+            # Mark cube done by reward signal + learn target color
             if jump_reward >= 25 and not using_disc and state.qbert:
                 reader.mark_cube_done_by_reward(state.qbert)
+                reader.learn_target_color(state.qbert)
 
             # Re-read cubes from RAM after landing
             cube_done = reader.read_cube_done()
@@ -745,7 +746,7 @@ def run():
                 # many "undone" cubes (>10) that give 0 reward — baseline mismatch
                 # Tracking fix: after multi-hit levels, carry-over can make baseline
                 # match target color. Switch to reward tracking quickly.
-                if (_no_progress_count >= 5 and cubes_remaining > 10
+                if (_no_progress_count >= 3 and cubes_remaining > 10
                         and reader._reward_done is None and not _on_second_pass
                         and _prev_level_was_multi_hit):
                     print(f"  ** Tracking fix: carry-over from multi-hit level")
@@ -806,6 +807,12 @@ def run():
                     obs, extra_r, done, info = reader.wait_for_level_start()
                     total_reward += extra_r
                 reader.set_level(level)  # snapshot baseline AFTER transition
+                # After multi-hit levels, use empty reward tracking
+                # (carry-over makes baseline unreliable — all cubes need fresh tracking)
+                if _prev_level_was_multi_hit:
+                    reader._reward_done = set()  # enable reward tracking
+                    # DON'T set _on_second_pass — toggle levels need peel routing
+                    print(f"  ** L{level}: fresh tracking (post multi-hit)")
                 state = reader.read_state(obs, info) if not done else state
                 # Handle death during level transition
                 if not done and state.lives < prev_lives:
