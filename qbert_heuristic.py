@@ -494,6 +494,7 @@ def make_cube_grid():
 
 
 def run():
+    global _no_progress_count, _on_second_pass, _prev_level_was_multi_hit
     speed = int(sys.argv[sys.argv.index("--speed") + 1]) if "--speed" in sys.argv else 1
     start_level = int(sys.argv[sys.argv.index("--level") + 1]) if "--level" in sys.argv else 1
     fast = "--fast" in sys.argv
