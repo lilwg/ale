@@ -328,7 +328,8 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
         1 for r in range(MAX_ROW + 1) for c in range(r + 1) if not cube_done[r][c]
     )
 
-    # FINISH LEVEL: if few cubes left, rush to complete (but never onto Coily)
+
+    # FINISH LEVEL: if few cubes left, rush to complete
     if cubes_remaining <= 3:
         action = bfs_nearest_undone(row, col, cube_done)
         if action is not None:
@@ -440,21 +441,30 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     # ROUTE: use simple BFS on multi-hit second pass (peel routing's done-cube
     # penalty causes agent to skip nearby undone cubes on second pass)
     route_fn = bfs_peel_route if (level >= 3 and not _on_second_pass) else bfs_nearest_undone
-    # Try peel route, then BFS fallback, each with danger then no blocking
     route_fns = [route_fn] if route_fn == bfs_nearest_undone else [route_fn, bfs_nearest_undone]
+    # Try routes with 3-step survival, then 2-step
+    for survival_depth in [3, 2]:
+        for fn in route_fns:
+            for blocked_set in [danger, set()]:
+                action = fn(row, col, cube_done, blocked_set)
+                if action is not None:
+                    nr, nc, pc, safe = is_move_safe(row, col, action, coily)
+                    if safe and (not coily or survives_n_steps(nr, nc, pc, survival_depth)):
+                        return action
+    # All routes fail survival — prioritize safety (flee away from Coily)
+    if coily and safe_moves:
+        best = max(safe_moves, key=lambda x: (
+            grid_distance(x[1], x[2], coily[0], coily[1]) * 3 + x[4]
+            + (10 if not cube_done[x[1]][x[2]] else 0)
+        ))
+        return best[0]
+    # Basic fallback: any safe route
     for fn in route_fns:
-        for blocked_set in [danger, set()]:
-            action = fn(row, col, cube_done, blocked_set)
-            if action is not None:
-                nr, nc, pc, safe = is_move_safe(row, col, action, coily)
-                if safe and (not coily or survives_n_steps(nr, nc, pc, 3)):
-                    return action
-    # Last resort: BFS, basic safety only
-    action = bfs_nearest_undone(row, col, cube_done)
-    if action is not None:
-        _, _, _, safe = is_move_safe(row, col, action, coily)
-        if safe:
-            return action
+        action = fn(row, col, cube_done)
+        if action is not None:
+            _, _, _, safe = is_move_safe(row, col, action, coily)
+            if safe:
+                return action
 
     # Last resort: any safe move maximizing distance from Coily
     if safe_moves:
@@ -728,10 +738,10 @@ def run():
                 _no_progress_count = 0
             else:
                 _no_progress_count += 1
-                if _no_progress_count == 10:
+                if _no_progress_count == 20:
                     undone = [(r,c) for r in range(MAX_ROW+1) for c in range(r+1)
                               if not cube_done[r][c]]
-                    print(f"  !! STUCK 10 jumps: undone={undone} pos=({row},{col})")
+                    print(f"  !! STUCK 10 jumps: undone={undone} pos=({row},{col}) C={state.coily} E={state.enemies} discs={len(discs_available)}")
             prev_cubes_colored = cubes_colored
 
             # LEVEL COMPLETE: baseline says 21/21 cubes changed.
