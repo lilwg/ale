@@ -229,19 +229,23 @@ def bfs_nearest_undone(row, col, cube_done, blocked=set()):
     seen = {(row, col)}
     queue = deque()
     for action, nr, nc in neighbors(row, col):
-        if (nr, nc) not in seen and (nr, nc) not in blocked:
+        if (nr, nc) not in seen:
+            # Allow reaching blocked positions as DESTINATIONS (undone cubes)
+            # but don't traverse THROUGH blocked positions
             if not cube_done[nr][nc]:
                 return action
-            seen.add((nr, nc))
-            queue.append((nr, nc, action))
+            if (nr, nc) not in blocked:
+                seen.add((nr, nc))
+                queue.append((nr, nc, action))
     while queue:
         cr, cc, first_action = queue.popleft()
         for _, nr, nc in neighbors(cr, cc):
-            if (nr, nc) not in seen and (nr, nc) not in blocked:
+            if (nr, nc) not in seen:
                 if not cube_done[nr][nc]:
                     return first_action
-                seen.add((nr, nc))
-                queue.append((nr, nc, first_action))
+                if (nr, nc) not in blocked:
+                    seen.add((nr, nc))
+                    queue.append((nr, nc, first_action))
     return None
 
 
@@ -272,11 +276,14 @@ def bfs_peel_route(row, col, cube_done, blocked=set(), reversion_penalty=4):
                 and not cube_done[cr][cc]:
             return first_action
         for action, nr, nc in neighbors(cr, cc):
-            if (nr, nc) in blocked:
+            # Allow reaching blocked undone cubes as destinations
+            if (nr, nc) in blocked and cube_done[nr][nc]:
                 continue
             step_cost = 1
             if cube_done[nr][nc]:
                 step_cost += reversion_penalty
+            if (nr, nc) in blocked:
+                step_cost += 8  # high cost but not impossible
             new_cost = cost + step_cost
             if new_cost < dist.get((nr, nc), float('inf')):
                 dist[(nr, nc)] = new_cost
