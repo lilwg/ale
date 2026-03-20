@@ -174,17 +174,14 @@ def is_move_safe(row, col, action, coily):
     # Unsafe if Coily is on the destination
     if (coily[0], coily[1]) == (nr, nc):
         return nr, nc, coily, False
-    # Check 2 steps of Coily movement (Coily can move during Q*bert's jump animation)
-    # Step 1: Coily chases Q*bert's destination
+    # Check 2 steps of Coily movement + 3-step survival
     step1_moves = predict_coily_moves(coily[0], coily[1], nr, nc)
     if (nr, nc) in step1_moves:
         return nr, nc, coily, False
-    # Step 2: from each step-1 position, Coily chases again
     for s1r, s1c in step1_moves:
         step2_moves = predict_coily_moves(s1r, s1c, nr, nc)
         if (nr, nc) in step2_moves:
             return nr, nc, coily, False
-    # Return the most likely predicted position for downstream use
     pcr, pcc = predict_coily_move(coily[0], coily[1], nr, nc)
     return nr, nc, (pcr, pcc), True
 
@@ -739,6 +736,9 @@ def run():
             else:
                 _no_progress_count += 1
                 if _no_progress_count == 20:
+                    undone = [(r,c) for r in range(MAX_ROW+1) for c in range(r+1)
+                              if not cube_done[r][c]]
+                    print(f"  !! STUCK 20 jumps: undone={undone} pos=({row},{col}) C={state.coily}")
                     undone = [(r,c) for r in range(MAX_ROW+1) for c in range(r+1)
                               if not cube_done[r][c]]
                     print(f"  !! STUCK 10 jumps: undone={undone} pos=({row},{col}) C={state.coily} E={state.enemies} discs={len(discs_available)}")
