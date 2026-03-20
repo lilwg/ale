@@ -403,6 +403,11 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
                 # Penalty for reverting done cubes on toggle levels
                 if level >= 3 and cube_done[nr][nc]:
                     cube_val = -8
+                # When no discs, bonus for undone cubes that are far from Coily
+                # (lead Coily one way, color cubes the other way)
+                if not discs_available and not cube_done[nr][nc]:
+                    cube_coily_dist = grid_distance(nr, nc, coily[0], coily[1])
+                    cube_val += cube_coily_dist * 2
 
                 # Avoid dead ends and bottom row when enemies present
                 dead_end_penalty = -15 if esc == 0 else (-8 if esc == 1 else 0)
@@ -435,23 +440,19 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     # ROUTE: use simple BFS on multi-hit second pass (peel routing's done-cube
     # penalty causes agent to skip nearby undone cubes on second pass)
     route_fn = bfs_peel_route if (level >= 3 and not _on_second_pass) else bfs_nearest_undone
-    blocked_options = [danger, set()]
-    for blocked_set in blocked_options:
-        action = route_fn(row, col, cube_done, blocked_set)
-        if action is not None:
-            nr, nc, pc, safe = is_move_safe(row, col, action, coily)
-            if safe and (not coily or survives_n_steps(nr, nc, pc, 3)):
-                return action
-    # Final fallback: route with survival check but no danger blocking
-    action = route_fn(row, col, cube_done)
+    # Try peel route, then BFS fallback, each with danger then no blocking
+    route_fns = [route_fn] if route_fn == bfs_nearest_undone else [route_fn, bfs_nearest_undone]
+    for fn in route_fns:
+        for blocked_set in [danger, set()]:
+            action = fn(row, col, cube_done, blocked_set)
+            if action is not None:
+                nr, nc, pc, safe = is_move_safe(row, col, action, coily)
+                if safe and (not coily or survives_n_steps(nr, nc, pc, 3)):
+                    return action
+    # Last resort: BFS, basic safety only
+    action = bfs_nearest_undone(row, col, cube_done)
     if action is not None:
-        nr, nc, pc, safe = is_move_safe(row, col, action, coily)
-        if safe and (not coily or survives_n_steps(nr, nc, pc, 2)):
-            return action
-    # Last resort: any move that survives at least 1 step
-    action = route_fn(row, col, cube_done)
-    if action is not None:
-        nr, nc, _, safe = is_move_safe(row, col, action, coily)
+        _, _, _, safe = is_move_safe(row, col, action, coily)
         if safe:
             return action
 
@@ -464,7 +465,7 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
             return best[0]
         return safe_moves[0][0]
 
-    # Emergency: navigate toward disc to lure Coily for a kill (not escape)
+    # Emergency: navigate toward disc to lure Coily for a kill
     if coily_is_snake and discs_available:
         target_disc = min(discs_available, key=lambda d: grid_distance(row, col, d[0], d[1]))
         if (row, col) == target_disc and coily_dist <= 2:
