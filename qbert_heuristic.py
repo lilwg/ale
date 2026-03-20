@@ -343,9 +343,26 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     if coily_is_snake and discs_available:
         on_disc = (row, col) in discs_available
 
-        # Fire disc ONLY when Coily is adjacent — guaranteed kill
+        # Fire disc when Coily is adjacent (guaranteed kill)
         if on_disc and coily_dist <= 1:
             return DISCS[(row, col)]
+
+        # Wait on disc for Coily to approach — don't leave!
+        if on_disc and coily_dist <= 4:
+            # Stay near the disc: pick a neighbor that's closest to the disc
+            # This makes Q*bert "hover" near the disc waiting for Coily
+            best_wait = None
+            best_wait_dist = 99
+            for a, nr, nc in neighbors(row, col):
+                _, _, _, safe = is_move_safe(row, col, a, coily)
+                if safe:
+                    # Prefer moves that keep Q*bert close to the disc
+                    d_to_disc = grid_distance(nr, nc, row, col)
+                    if d_to_disc <= best_wait_dist:
+                        best_wait_dist = d_to_disc
+                        best_wait = a
+            if best_wait is not None:
+                return best_wait
 
         # Lure mode: navigate toward disc when Coily is close and chasing
         if coily_dist <= 3:
@@ -420,15 +437,20 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     for blocked_set in blocked_options:
         action = route_fn(row, col, cube_done, blocked_set)
         if action is not None:
-            _, _, _, safe = is_move_safe(row, col, action, coily)
-            if safe:
+            nr, nc, pc, safe = is_move_safe(row, col, action, coily)
+            if safe and (not coily or survives_n_steps(nr, nc, pc, 3)):
                 return action
-    # Final fallback: route with basic safety (just don't step ON Coily)
+    # Final fallback: route with survival check but no danger blocking
     action = route_fn(row, col, cube_done)
     if action is not None:
-        dr, dc, _ = MOVES[action]
-        nr, nc = row + dr, col + dc
-        if not coily or (nr, nc) != coily:
+        nr, nc, pc, safe = is_move_safe(row, col, action, coily)
+        if safe and (not coily or survives_n_steps(nr, nc, pc, 2)):
+            return action
+    # Last resort: any move that survives at least 1 step
+    action = route_fn(row, col, cube_done)
+    if action is not None:
+        nr, nc, _, safe = is_move_safe(row, col, action, coily)
+        if safe:
             return action
 
     # Last resort: any safe move maximizing distance from Coily
@@ -443,8 +465,8 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     # Emergency: navigate toward disc to lure Coily for a kill (not escape)
     if coily_is_snake and discs_available:
         target_disc = min(discs_available, key=lambda d: grid_distance(row, col, d[0], d[1]))
-        if (row, col) == target_disc and coily_dist <= 1:
-            return DISCS[(row, col)]  # Kill only, not escape
+        if (row, col) == target_disc and coily_dist <= 2:
+            return DISCS[(row, col)]
         action = bfs_path_to(row, col, target_disc[0], target_disc[1])
         if action is not None:
             return action
