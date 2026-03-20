@@ -142,7 +142,8 @@ class QbertStateReader:
         self._stable_count = 0
         self._cube_initial_color = None
         self._cube_start_values = None  # per-cube baseline at level start
-        self._cube_target_color = None  # learned from gameplay (25pt reward)
+        self._cube_target_color = None
+        self._reward_done = None  # set of (r,c) confirmed done by reward signal
         self._level = 1
 
     # Known level color cycle (verified empirically, repeats every 4 levels)
@@ -151,14 +152,30 @@ class QbertStateReader:
     def set_level(self, level):
         """Set the current level and snapshot cube baseline for change detection."""
         self._level = level
-        # Use known color cycle (period 4)
         cycle_pos = ((level - 1) % 4) + 1
         self._cube_initial_color = self.LEVEL_COLORS[cycle_pos]
-        self._cube_target_color = None  # will be learned from first 25pt reward
-        # Snapshot current cube values as the baseline for this level.
+        self._cube_target_color = None
+        self._reward_done = None  # reset reward tracking
         ram = self.env.unwrapped.ale.getRAM()
         self._cube_start_values = {(r, c): int(ram[addr])
                                     for (r, c), addr in CUBE_RAM.items()}
+
+    def enable_reward_tracking(self):
+        """Switch to reward-based cube tracking (when baseline is wrong).
+        Seeds with cubes currently marked as done by baseline tracking."""
+        if self._reward_done is None:
+            self._reward_done = set()
+            # Seed from baseline tracking
+            if self._cube_start_values is not None:
+                ram = self.env.unwrapped.ale.getRAM()
+                for (r, c), addr in CUBE_RAM.items():
+                    if int(ram[addr]) != self._cube_start_values[(r, c)]:
+                        self._reward_done.add((r, c))
+
+    def mark_cube_done_by_reward(self, pos):
+        """Mark a cube as done because Q*bert got a reward there."""
+        if self._reward_done is not None and pos:
+            self._reward_done.add(pos)
 
     def wait_for_level_start(self, first_action=5, max_frames=300):
         """Two-phase level start: NOOP during celebration, then first move.
@@ -210,25 +227,27 @@ class QbertStateReader:
         return obs, total_r, done, info
 
     def read_cube_done(self):
-        """Read cube done/not-done state from RAM using per-cube baseline.
-        A cube is 'done' when its value CHANGES from the level-start baseline."""
-        ram = self.env.unwrapped.ale.getRAM()
+        """Read cube done/not-done state. Uses reward tracking if enabled,
+        otherwise falls back to RAM baseline comparison."""
         cube_done = [[False] * (r + 1) for r in range(MAX_ROW + 1)]
-        baseline = self._cube_start_values
-        if baseline is None:
-            return cube_done
-        for (r, c), addr in CUBE_RAM.items():
-            cube_done[r][c] = (int(ram[addr]) != baseline[(r, c)])
+        if self._reward_done is not None:
+            for (r, c) in self._reward_done:
+                cube_done[r][c] = True
+        elif self._cube_start_values is not None:
+            ram = self.env.unwrapped.ale.getRAM()
+            for (r, c), addr in CUBE_RAM.items():
+                cube_done[r][c] = (int(ram[addr]) != self._cube_start_values[(r, c)])
         return cube_done
 
     def count_done_cubes(self):
-        """Count completed cubes from RAM using per-cube baseline."""
-        ram = self.env.unwrapped.ale.getRAM()
-        baseline = self._cube_start_values
-        if baseline is None:
-            return 0
-        return sum(1 for (r, c), addr in CUBE_RAM.items()
-                   if int(ram[addr]) != baseline[(r, c)])
+        """Count completed cubes."""
+        if self._reward_done is not None:
+            return len(self._reward_done)
+        elif self._cube_start_values is not None:
+            ram = self.env.unwrapped.ale.getRAM()
+            return sum(1 for (r, c), addr in CUBE_RAM.items()
+                       if int(ram[addr]) != self._cube_start_values[(r, c)])
+        return 0
 
     def read_qbert_position(self):
         """Read Q*bert's grid position directly from RAM. Instant."""

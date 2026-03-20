@@ -288,6 +288,7 @@ def bfs_peel_route(row, col, cube_done, blocked=set()):
 _no_progress_count = 0
 _route_target = None
 _on_second_pass = False
+_prev_level_was_multi_hit = False
 
 def pick_action(row, col, cube_done, state, discs_available, level=1):
     global _no_progress_count, _route_target
@@ -678,6 +679,10 @@ def run():
             jump_count += 1
             state = reader.read_state(obs, info, jump_reward, done)
 
+            # Mark cube done by reward signal (for reward-based tracking)
+            if jump_reward >= 25 and not using_disc and state.qbert:
+                reader.mark_cube_done_by_reward(state.qbert)
+
             # Re-read cubes from RAM after landing
             cube_done = reader.read_cube_done()
             cubes_colored = reader.count_done_cubes()
@@ -738,10 +743,13 @@ def run():
                 _no_progress_count += 1
                 # Re-snapshot when clearly wrong: 15+ no-progress jumps AND
                 # many "undone" cubes (>10) that give 0 reward — baseline mismatch
-                if (_no_progress_count >= 15 and cubes_remaining > 10
-                        and jump_reward == 0 and not _on_second_pass):
-                    print(f"  ** Tracking fix: re-snapshot ({cubes_remaining} undone, 0 reward)")
-                    reader.set_level(level)
+                # Tracking fix: after multi-hit levels, carry-over can make baseline
+                # match target color. Switch to reward tracking quickly.
+                if (_no_progress_count >= 5 and cubes_remaining > 10
+                        and reader._reward_done is None and not _on_second_pass
+                        and _prev_level_was_multi_hit):
+                    print(f"  ** Tracking fix: carry-over from multi-hit level")
+                    reader.enable_reward_tracking()
                     _on_second_pass = True
                     _no_progress_count = 0
                     undone = [(r,c) for r in range(MAX_ROW+1) for c in range(r+1)
@@ -774,6 +782,7 @@ def run():
                 if not game_confirmed and not done:
                     # Multi-hit level: re-snapshot baseline for next pass
                     _on_second_pass = True
+                    _prev_level_was_multi_hit = True
                     print(f"  ** Multi-hit: re-snapshot for next pass (using BFS)")
                     reader.set_level(level)
                     cube_done = reader.read_cube_done()
