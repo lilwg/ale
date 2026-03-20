@@ -245,7 +245,7 @@ def bfs_nearest_undone(row, col, cube_done, blocked=set()):
     return None
 
 
-def bfs_peel_route(row, col, cube_done, blocked=set()):
+def bfs_peel_route(row, col, cube_done, blocked=set(), reversion_penalty=4):
     """Dijkstra toward nearest undone cube in lowest incomplete peel layer.
     Adds +4 cost for traversing done cubes (reversion penalty on toggle levels)."""
     # Find target: lowest peel layer with any undone cubes
@@ -276,7 +276,7 @@ def bfs_peel_route(row, col, cube_done, blocked=set()):
                 continue
             step_cost = 1
             if cube_done[nr][nc]:
-                step_cost += 4
+                step_cost += reversion_penalty
             new_cost = cost + step_cost
             if new_cost < dist.get((nr, nc), float('inf')):
                 dist[(nr, nc)] = new_cost
@@ -381,9 +381,8 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
                                 return action
 
     # FLEE + ROUTE: unified scoring only when Coily is close
-    # Flee only when discs available (can kill Coily). Without discs,
-    # fleeing just delays death — keep routing to finish cubes instead.
-    if coily and coily_dist <= 3 and discs_available:
+    # FLEE: Coily close — but NEVER flee to dead ends
+    if coily and coily_dist <= 3:
         # Score all safe moves by combined value
         candidates = safe_with_followup if safe_with_followup else safe_moves
         if candidates:
@@ -410,15 +409,12 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
                     cube_coily_dist = grid_distance(nr, nc, coily[0], coily[1])
                     cube_val += cube_coily_dist * 2
 
-                # Avoid dead ends and bottom row when enemies present
+                # Avoid dead ends — prefer positions with escape routes
                 dead_end_penalty = -15 if esc == 0 else (-8 if esc == 1 else 0)
-                # Row 5 is a trap — very few escape routes, enemies approach from above
-                if nr == MAX_ROW and (state.enemies or coily):
+                if nr == MAX_ROW:
                     dead_end_penalty -= 12
-                # Corners (5,0) and (5,5) have only 1 neighbor — death trap
-                if (nr, nc) in ((5, 0), (5, 5)) and (state.enemies or coily):
+                if (nr, nc) in ((5, 0), (5, 5)):
                     dead_end_penalty -= 25
-                # Edges (col==0 or col==row) are red ball bounce paths
                 if (nc == 0 or nc == nr) and state.enemies:
                     dead_end_penalty -= 5
 
@@ -438,9 +434,12 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
             if best_action is not None:
                 return best_action
 
-    # ROUTE: use simple BFS on multi-hit second pass (peel routing's done-cube
-    # penalty causes agent to skip nearby undone cubes on second pass)
-    route_fn = bfs_peel_route if (level >= 3 and not _on_second_pass) else bfs_nearest_undone
+    # ROUTE: always use peel routing on L3+ (corners first, then inner cubes).
+    # This ensures bottom-row/corner cubes are completed first, so Q*bert
+    # can lead Coily around the center where there are more escape routes.
+    # On second pass of non-toggle levels: no reversion penalty (cubes don't revert)
+    peel_penalty = 0 if _on_second_pass else 4
+    route_fn = (lambda r, c, cd, b=set(): bfs_peel_route(r, c, cd, b, peel_penalty)) if level >= 3 else bfs_nearest_undone
     route_fns = [route_fn] if route_fn == bfs_nearest_undone else [route_fn, bfs_nearest_undone]
     # Try routes with 3-step survival, then 2-step
     for survival_depth in [3, 2]:
