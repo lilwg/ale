@@ -327,8 +327,10 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
     )
 
 
-    # FINISH LEVEL: if few cubes left, rush to complete
-    if cubes_remaining <= 3:
+    # FINISH LEVEL: if few cubes left, rush to complete.
+    # When no discs, be more aggressive (fleeing just delays death).
+    finish_threshold = 5 if not discs_available else 3
+    if cubes_remaining <= finish_threshold:
         action = bfs_nearest_undone(row, col, cube_done)
         if action is not None:
             _, _, _, safe = is_move_safe(row, col, action, coily)
@@ -379,8 +381,9 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
                                 return action
 
     # FLEE + ROUTE: unified scoring only when Coily is close
-    # At distance 4+, normal BFS routing handles avoidance via danger zone
-    if coily and coily_dist <= 3:
+    # Flee only when discs available (can kill Coily). Without discs,
+    # fleeing just delays death — keep routing to finish cubes instead.
+    if coily and coily_dist <= 3 and discs_available:
         # Score all safe moves by combined value
         candidates = safe_with_followup if safe_with_followup else safe_moves
         if candidates:
