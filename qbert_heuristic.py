@@ -289,23 +289,23 @@ def bfs_peel_route(row, col, cube_done, blocked=set()):
 
 
 _no_progress_count = 0
+_route_target = None  # committed routing target (row, col)
 
 def pick_action(row, col, cube_done, state, discs_available, level=1):
-    global _no_progress_count
+    global _no_progress_count, _route_target
     coily = state.coily
 
-    # Danger zone: all enemies + their neighbors + predicted next positions
+    # Danger zone: enemies + neighbors + predicted bounce path
     danger = set()
     for epos in state.enemies:
         danger.add(epos)
         for _, nr, nc in neighbors(epos[0], epos[1]):
             danger.add((nr, nc))
-        # Predict next bounce: enemies move DOWN (row+1), so block 2 rows ahead
         for _, nr, nc in neighbors(epos[0], epos[1]):
-            if nr > epos[0]:  # downward neighbor
+            if nr > epos[0]:
                 danger.add((nr, nc))
                 for _, nnr, nnc in neighbors(nr, nc):
-                    if nnr > nr:  # 2 rows down
+                    if nnr > nr:
                         danger.add((nnr, nnc))
     # Ensure Coily (pixel-detected, most reliable) is always in danger
     if coily:
@@ -424,12 +424,11 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
             if best_action is not None:
                 return best_action
 
-    # ROUTE: peel-based Dijkstra for L3+ (outside-in, reversion penalty),
-    # simple BFS for L1-2
+    # ROUTE
     route_fn = bfs_peel_route if level >= 3 else bfs_nearest_undone
     # If stuck (no progress for many jumps), ignore danger zone to break out
     if _no_progress_count >= 8:
-        blocked_options = [set()]  # skip danger blocking entirely
+        blocked_options = [set()]
     else:
         blocked_options = [danger, set()]
     for blocked_set in blocked_options:
