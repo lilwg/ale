@@ -745,7 +745,7 @@ def run():
                 # many "undone" cubes (>10) that give 0 reward — baseline mismatch
                 # Tracking fix: after multi-hit levels, carry-over can make baseline
                 # match target color. Switch to reward tracking quickly.
-                if (_no_progress_count >= 3 and cubes_remaining > 10
+                if (_no_progress_count >= 3 and (NUM_CUBES - cubes_colored) > 10
                         and reader._reward_done is None and not _on_second_pass
                         and _prev_level_was_multi_hit):
                     print(f"  ** Tracking fix: carry-over from multi-hit level")
