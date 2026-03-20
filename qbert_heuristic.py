@@ -781,11 +781,20 @@ def run():
                 if not done:
                     state = reader.read_state(obs_c, info_c)
                 if not game_confirmed and not done:
-                    # Multi-hit level: re-snapshot baseline for next pass
+                    # Multi-hit level: use majority value as "undone" marker
                     _on_second_pass = True
                     _prev_level_was_multi_hit = True
-                    print(f"  ** Multi-hit: re-snapshot for next pass (using BFS)")
-                    reader.set_level(level)
+                    from collections import Counter
+                    ram = env.unwrapped.ale.getRAM()
+                    vals = [int(ram[addr]) for addr in CUBE_RAM.values()]
+                    majority = Counter(vals).most_common(1)[0][0]
+                    # Set ALL baseline values to the majority — cubes at majority = "undone"
+                    reader._cube_start_values = {(r, c): majority
+                                                  for (r, c) in CUBE_RAM.keys()}
+                    reader._cube_target_color = None
+                    reader._reward_done = None
+                    done_count = sum(1 for v in vals if v != majority)
+                    print(f"  ** Multi-hit: second pass, majority={majority}, {done_count}/21 already done")
                     cube_done = reader.read_cube_done()
                     prev_cubes_colored = reader.count_done_cubes()
                     if state.qbert:
