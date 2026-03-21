@@ -183,7 +183,13 @@ class QbertStateReader:
         done = False
         prev_pos = self.read_qbert_position()
         for i in range(max_frames):
-            obs, r, t, tr, info = self.env.step(first_action)
+            # Send DOWN but check it's safe first (Q*bert might be at bottom row)
+            pos = self.read_qbert_position()
+            if pos and pos[0] >= MAX_ROW:
+                action = 2  # UP instead of DOWN when at bottom
+            else:
+                action = first_action
+            obs, r, t, tr, info = self.env.step(action)
             total_r += r
             if t or tr:
                 done = True
