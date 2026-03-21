@@ -173,46 +173,39 @@ class QbertStateReader:
         if self._reward_done is not None and pos:
             self._reward_done.add(pos)
 
-    def wait_for_level_start(self, first_action=5, max_frames=150):
-        """Spam first_action through celebration until it works (Q*bert moves + reward).
-        No separate celebration wait needed — just keep trying.
+    def wait_for_level_start(self, max_frames=300):
+        """Play a fixed safe pattern through celebration until a move gives reward.
+        Pattern: 5 DL, 1 UR, (1 DR, 1 UL)*4, 1 DR — covers left column.
+        During celebration the game ignores input. When level starts,
+        first successful move gives 25 reward.
         Returns (obs, total_reward, done, info)."""
         total_r = 0
         obs = None
         info = {}
         done = False
-        prev_pos = self.read_qbert_position()
+        # DL=5, UR=2, DR=3, UL=4
+        # Restart pattern each cycle so first real move is always DL from (0,0)
+        pattern = [5]*5 + [2] + [3,4]*4 + [3]
         for i in range(max_frames):
-            # Send DOWN but check it's safe first (Q*bert might be at bottom row)
-            pos = self.read_qbert_position()
-            if pos and pos[0] >= MAX_ROW:
-                action = 2  # UP instead of DOWN when at bottom
-            else:
-                action = first_action
+            action = pattern[i % len(pattern)]
             obs, r, t, tr, info = self.env.step(action)
             total_r += r
             if t or tr:
                 done = True
                 break
-            pos = self.read_qbert_position()
-            # Level started when Q*bert colors a cube (exactly 25 reward, not bonus)
-            if r == 25 and pos != prev_pos and pos is not None:
+            if r == 25:
                 obs2, r2, done2, info = self.wait_for_landing(15)
                 total_r += r2
                 done = done2
-                if not done:
-                    from collections import Counter
-                    ram = self.env.unwrapped.ale.getRAM()
-                    vals = [int(ram[addr]) for addr in CUBE_RAM.values()]
-                    majority = Counter(vals).most_common(1)[0][0]
-                    self._cube_start_values = {rc: majority for rc in CUBE_RAM.keys()}
                 break
-            prev_pos = pos
-        if not done and self._cube_start_values is None:
+        if not done:
+            from collections import Counter
             ram = self.env.unwrapped.ale.getRAM()
-            self._cube_start_values = {(r, c): int(ram[addr])
-                                        for (r, c), addr in CUBE_RAM.items()}
+            vals = [int(ram[addr]) for addr in CUBE_RAM.values()]
+            majority = Counter(vals).most_common(1)[0][0]
+            self._cube_start_values = {rc: majority for rc in CUBE_RAM.keys()}
         return obs, total_r, done, info
+
 
     def learn_target_color(self, qbert_pos):
         """Learn the target color from a 25-point reward cube."""
