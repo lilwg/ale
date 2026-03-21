@@ -761,83 +761,27 @@ def run():
                 print(f"  #{jump_count:3d} {move_name:>11s}->({row},{col}) cubes:{cubes_colored}/{NUM_CUBES} score:{total_reward:.0f} r={jump_reward:.0f}{cs}{tgt}")
             elif cubes_colored < prev_cubes_colored and level >= 3:
                 print(f"  #{jump_count:3d} REVERTED ({row},{col}) cubes:{cubes_colored}/{NUM_CUBES}")
-            # Track stuck detection — if visiting "undone" cubes gives 0 reward,
-            # the baseline is wrong (carry-over). Re-snapshot to fix tracking.
-            if cubes_colored > prev_cubes_colored:
-                _no_progress_count = 0
-            else:
-                _no_progress_count += 1
-                # Re-snapshot when clearly wrong: 15+ no-progress jumps AND
-                # many "undone" cubes (>10) that give 0 reward — baseline mismatch
-                # Tracking fix: after multi-hit levels, carry-over can make baseline
-                # match target color. Switch to reward tracking quickly.
-                if (_no_progress_count >= 3 and (NUM_CUBES - cubes_colored) > 10
-                        and reader._reward_done is None and not _on_second_pass
-                        and _prev_level_was_multi_hit):
-                    print(f"  ** Tracking fix: carry-over from multi-hit level")
-                    reader.enable_reward_tracking()
-                    _on_second_pass = True
-                    _no_progress_count = 0
-                    undone = [(r,c) for r in range(MAX_ROW+1) for c in range(r+1)
-                              if not cube_done[r][c]]
-                    print(f"  !! STUCK 10 jumps: undone={undone} pos=({row},{col}) C={state.coily} E={state.enemies} discs={len(discs_available)}")
             prev_cubes_colored = cubes_colored
 
-            # LEVEL COMPLETE: baseline says 21/21 cubes changed.
-            # Verify with game: wait a few frames for celebration to start.
-            if cubes_colored >= NUM_CUBES:
-                # Check if game celebrates: send NOOPs and watch for
-                # score jump (level bonus) or position going invalid
-                game_confirmed = False
-                check_score = total_reward
-                for _ in range(25):
+            # LEVEL COMPLETE: check RAM[0] (hw $80) for value 1.
+            # This ONLY appears during the level completion bonus cycle.
+            # Much more reliable than cubes_colored (celebration flash corrupts it).
+            game_state = env.unwrapped.ale.getRAM()[0]
+            game_level_complete = (game_state == 1)
+
+            if game_level_complete:
+                # Wait for the bonus to finish
+                for _ in range(50):
                     obs_c, r_c, t_c, tr_c, info_c = env.step(NOOP)
                     total_reward += r_c
-                    if t_c or tr_c:
-                        done = True
-                        game_confirmed = True
-                        break
-                    if reader.read_qbert_position() is None:
-                        game_confirmed = True
-                        break
-                # Score jumped significantly = level bonus = game completed
-                if total_reward - check_score >= 500:
-                    game_confirmed = True
+                    if t_c or tr_c: done = True; break
                 if not done:
                     state = reader.read_state(obs_c, info_c)
-                if not game_confirmed and not done:
-                    # Multi-hit level: use majority value as "undone" marker
-                    _prev_level_was_multi_hit = True
-                    ram = env.unwrapped.ale.getRAM()
-                    vals = [int(ram[addr]) for addr in CUBE_RAM.values()]
-                    majority = Counter(vals).most_common(1)[0][0]
-                    done_count = sum(1 for v in vals if v != majority)
-                    if done_count > 0 and not _on_second_pass:
-                        # Re-snapshot with majority as baseline
-                        _on_second_pass = True
-                        reader._cube_start_values = {(r, c): majority
-                                                      for (r, c) in CUBE_RAM.keys()}
-                        reader._cube_target_color = None
-                        reader._reward_done = None
-                        print(f"  ** Multi-hit: majority={majority}, {done_count}/21 already done")
-                    else:
-                        # All cubes same value OR already on second pass —
-                        # switch to reward tracking (only count 25-reward cubes)
-                        reader._reward_done = set()
-                        reader._cube_target_color = None
-                        reader._cube_start_values = None
-                        _on_second_pass = True
-                        print(f"  ** Tracking reset: reward-based (all cubes at {majority})")
-                    cube_done = reader.read_cube_done()
-                    prev_cubes_colored = reader.count_done_cubes()
-                    if state.qbert:
-                        row, col = state.qbert
-                    prev_lives = state.lives
-                    continue
-            else:
-                game_confirmed = False
 
-            if game_confirmed:
+            # No multi-hit detection needed — RAM[0]==1 only fires when
+            # the game truly considers the level complete (all passes done).
+
+            if game_level_complete:
                 print(f"\n  === LEVEL {level} COMPLETE! Score: {total_reward:.0f} ===\n")
                 level += 1
                 _on_second_pass = False
@@ -850,14 +794,6 @@ def run():
                     total_reward += extra_r
                 reader.set_level(level)  # snapshot baseline AFTER transition
                 # After multi-hit levels: use majority cube value as target
-                # (carry-over cubes at the majority value are already "done")
-                if _prev_level_was_multi_hit:
-                    ram = env.unwrapped.ale.getRAM()
-                    vals = [int(ram[addr]) for addr in CUBE_RAM.values()]
-                    majority = Counter(vals).most_common(1)[0][0]
-                    reader._cube_target_color = majority
-                    print(f"  ** L{level}: target={majority} from majority")
-                    print(f"  ** L{level}: fresh tracking (post multi-hit)")
                 state = reader.read_state(obs, info) if not done else state
                 # Handle death during level transition
                 if not done and state.lives < prev_lives:
