@@ -186,10 +186,12 @@ class QbertStateReader:
         info = {}
         done = False
         prev_pos = self.read_qbert_position()
+        gameplay_count = 0
         for i in range(max_frames):
-            # NOOP during flash (RAM[0] 1↔2), DOWN during gameplay (3+)
+            # Wait for RAM[0]==3 sustained (gameplay), not brief celebration pass
             gs = self.env.unwrapped.ale.getRAM()[0]
-            action = first_action if gs >= 3 else 0
+            gameplay_count = gameplay_count + 1 if gs == 3 else 0
+            action = first_action if gameplay_count >= 3 else 0
             obs, r, t, tr, info = self.env.step(action)
             total_r += r
             if t or tr:

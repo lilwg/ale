@@ -774,23 +774,8 @@ def run():
             game_level_complete = (game_state == 1)
 
             if game_level_complete:
-                # Collect celebration bonus: NOOP until score stops increasing
-                prev_score = total_reward
-                stable = 0
-                for _ in range(100):
-                    obs_c, r_c, t_c, tr_c, info_c = env.step(NOOP)
-                    total_reward += r_c
-                    if t_c or tr_c: done = True; break
-                    if total_reward == prev_score:
-                        stable += 1
-                        if stable >= 8:
-                            break  # bonus fully paid
-                    else:
-                        stable = 0
-                        prev_score = total_reward
-                # Don't wait for flash to end — go straight to level start
-                if not done:
-                    state = reader.read_state(obs_c, info_c)
+                # Just collect bonus frames — wait_for_level_start handles the rest
+                pass
 
             # No multi-hit detection needed — RAM[0]==1 only fires when
             # the game truly considers the level complete (all passes done).
