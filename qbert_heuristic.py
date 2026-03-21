@@ -774,11 +774,11 @@ def run():
             game_level_complete = (game_state == 1)
 
             if game_level_complete:
-                # Wait for ENTIRE celebration to finish.
-                # RAM[0] cycles through 1 multiple times during bonus.
-                # Wait until it's been NOT 1 for 10+ consecutive frames.
+                # Wait for celebration bonus + transition.
+                # NOOP until RAM[0] has been != 1 for 10 frames (bonus fully paid).
+                # Also collect the score bonus during this time.
                 not_one_count = 0
-                for _ in range(200):
+                for _ in range(150):
                     obs_c, r_c, t_c, tr_c, info_c = env.step(NOOP)
                     total_reward += r_c
                     if t_c or tr_c: done = True; break
