@@ -774,21 +774,21 @@ def run():
             game_level_complete = (game_state == 1)
 
             if game_level_complete:
-                # Wait for celebration bonus + transition.
-                # NOOP until RAM[0] has been != 1 for 10 frames (bonus fully paid).
-                # Also collect the score bonus during this time.
-                not_one_count = 0
-                for _ in range(150):
+                # Collect celebration bonus: NOOP until score stops increasing
+                prev_score = total_reward
+                stable = 0
+                for _ in range(100):
                     obs_c, r_c, t_c, tr_c, info_c = env.step(NOOP)
                     total_reward += r_c
                     if t_c or tr_c: done = True; break
-                    gs = env.unwrapped.ale.getRAM()[0]
-                    if gs != 1:
-                        not_one_count += 1
+                    if total_reward == prev_score:
+                        stable += 1
+                        if stable >= 8:
+                            break  # bonus fully paid
                     else:
-                        not_one_count = 0
-                    if not_one_count >= 10:
-                        break
+                        stable = 0
+                        prev_score = total_reward
+                # Don't wait for flash to end — go straight to level start
                 if not done:
                     state = reader.read_state(obs_c, info_c)
 

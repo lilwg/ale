@@ -187,8 +187,10 @@ class QbertStateReader:
         done = False
         prev_pos = self.read_qbert_position()
         for i in range(max_frames):
-            # Send DOWN — safe after celebration wait in main loop
-            obs, r, t, tr, info = self.env.step(first_action)
+            # NOOP during flash (RAM[0] 1↔2), DOWN during gameplay (3+)
+            gs = self.env.unwrapped.ale.getRAM()[0]
+            action = first_action if gs >= 3 else 0
+            obs, r, t, tr, info = self.env.step(action)
             total_r += r
             if t or tr:
                 done = True
