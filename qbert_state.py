@@ -150,15 +150,11 @@ class QbertStateReader:
     LEVEL_COLORS = {1: 148, 2: 26, 3: 10, 4: 152}
 
     def set_level(self, level):
-        """Set the current level and snapshot cube baseline for change detection."""
+        """Set the current level. Target color learned from first 25-reward."""
         self._level = level
-        cycle_pos = ((level - 1) % 4) + 1
-        self._cube_initial_color = self.LEVEL_COLORS[cycle_pos]
-        self._cube_target_color = None
-        self._reward_done = None  # reset reward tracking
-        ram = self.env.unwrapped.ale.getRAM()
-        self._cube_start_values = {(r, c): int(ram[addr])
-                                    for (r, c), addr in CUBE_RAM.items()}
+        self._cube_target_color = None  # learned from first colored cube
+        self._cube_start_values = None  # set by wait_for_level_start
+        self._reward_done = None
 
     def enable_reward_tracking(self):
         """Switch to reward-based cube tracking (when baseline is wrong).
@@ -186,20 +182,15 @@ class QbertStateReader:
         info = {}
         done = False
         prev_pos = self.read_qbert_position()
-        gameplay_count = 0
         for i in range(max_frames):
-            # Wait for RAM[0]==3 sustained (gameplay), not brief celebration pass
-            gs = self.env.unwrapped.ale.getRAM()[0]
-            gameplay_count = gameplay_count + 1 if gs == 3 else 0
-            action = first_action if gameplay_count >= 2 else 0
-            obs, r, t, tr, info = self.env.step(action)
+            obs, r, t, tr, info = self.env.step(first_action)
             total_r += r
             if t or tr:
                 done = True
                 break
             pos = self.read_qbert_position()
-            # Q*bert moved AND got reward = level started, move worked
-            if r >= 25 and pos != prev_pos and pos is not None:
+            # Level started when Q*bert colors a cube (exactly 25 reward, not bonus)
+            if r == 25 and pos != prev_pos and pos is not None:
                 obs2, r2, done2, info = self.wait_for_landing(15)
                 total_r += r2
                 done = done2
@@ -218,9 +209,8 @@ class QbertStateReader:
         return obs, total_r, done, info
 
     def learn_target_color(self, qbert_pos):
-        """Learn the target color from a 25-point reward cube.
-        Only activates when reward tracking is enabled (post-multi-hit levels)."""
-        if qbert_pos and self._cube_target_color is None and self._reward_done is not None:
+        """Learn the target color from a 25-point reward cube."""
+        if qbert_pos and self._cube_target_color is None:
             r, c = qbert_pos
             addr = CUBE_RAM.get((r, c))
             if addr is not None:
@@ -229,33 +219,26 @@ class QbertStateReader:
                 print(f"  ** Learned target color: {self._cube_target_color} at ({r},{c})")
 
     def read_cube_done(self):
-        """Read cube done/not-done state. Uses target color if known,
-        reward tracking if enabled, otherwise baseline comparison."""
+        """Read cube done state from RAM.
+        If target known: done = (value == target).
+        Otherwise: done = (value != initial) using baseline."""
         cube_done = [[False] * (r + 1) for r in range(MAX_ROW + 1)]
+        ram = self.env.unwrapped.ale.getRAM()
         if self._cube_target_color is not None:
-            # Target-based: most reliable for toggle/multi-hit levels
-            ram = self.env.unwrapped.ale.getRAM()
             for (r, c), addr in CUBE_RAM.items():
                 cube_done[r][c] = (int(ram[addr]) == self._cube_target_color)
-        elif self._reward_done is not None:
-            for (r, c) in self._reward_done:
-                cube_done[r][c] = True
         elif self._cube_start_values is not None:
-            ram = self.env.unwrapped.ale.getRAM()
             for (r, c), addr in CUBE_RAM.items():
                 cube_done[r][c] = (int(ram[addr]) != self._cube_start_values[(r, c)])
         return cube_done
 
     def count_done_cubes(self):
         """Count completed cubes."""
+        ram = self.env.unwrapped.ale.getRAM()
         if self._cube_target_color is not None:
-            ram = self.env.unwrapped.ale.getRAM()
             return sum(1 for addr in CUBE_RAM.values()
                        if int(ram[addr]) == self._cube_target_color)
-        elif self._reward_done is not None:
-            return len(self._reward_done)
         elif self._cube_start_values is not None:
-            ram = self.env.unwrapped.ale.getRAM()
             return sum(1 for (r, c), addr in CUBE_RAM.items()
                        if int(ram[addr]) != self._cube_start_values[(r, c)])
         return 0

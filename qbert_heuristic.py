@@ -708,9 +708,8 @@ def run():
             jump_count += 1
             state = reader.read_state(obs, info, jump_reward, done)
 
-            # Mark cube done by reward signal + learn target color
+            # Learn target color from first cube colored
             if jump_reward >= 25 and not using_disc and state.qbert:
-                reader.mark_cube_done_by_reward(state.qbert)
                 reader.learn_target_color(state.qbert)
 
             # Re-read cubes from RAM after landing
@@ -777,8 +776,8 @@ def run():
                 # Just collect bonus frames — wait_for_level_start handles the rest
                 pass
 
-            # No multi-hit detection needed — RAM[0]==1 only fires when
-            # the game truly considers the level complete (all passes done).
+            # Target-color tracking handles multi-hit automatically:
+            # once learned, done = (value == target) works for all passes.
 
             if game_level_complete:
                 print(f"\n  === LEVEL {level} COMPLETE! Score: {total_reward:.0f} ===\n")
