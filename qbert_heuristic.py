@@ -516,6 +516,8 @@ def make_cube_grid():
 
 
 def run():
+    import os
+    os.environ['SDL_AUDIODRIVER'] = 'dummy'  # disable game sound
     global _no_progress_count, _on_second_pass, _prev_level_was_multi_hit
     def _get_arg(name, default):
         try:
@@ -772,11 +774,21 @@ def run():
             game_level_complete = (game_state == 1)
 
             if game_level_complete:
-                # Wait for the bonus to finish
-                for _ in range(50):
+                # Wait for ENTIRE celebration to finish.
+                # RAM[0] cycles through 1 multiple times during bonus.
+                # Wait until it's been NOT 1 for 10+ consecutive frames.
+                not_one_count = 0
+                for _ in range(200):
                     obs_c, r_c, t_c, tr_c, info_c = env.step(NOOP)
                     total_reward += r_c
                     if t_c or tr_c: done = True; break
+                    gs = env.unwrapped.ale.getRAM()[0]
+                    if gs != 1:
+                        not_one_count += 1
+                    else:
+                        not_one_count = 0
+                    if not_one_count >= 10:
+                        break
                 if not done:
                     state = reader.read_state(obs_c, info_c)
 

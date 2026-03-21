@@ -177,53 +177,43 @@ class QbertStateReader:
         if self._reward_done is not None and pos:
             self._reward_done.add(pos)
 
-    def wait_for_level_start(self, first_action=5, max_frames=300):
-        """Two-phase level start: NOOP during celebration, then first move.
-        Phase 1: Send NOOP, wait for Q*bert to leave then return to (0,0).
-        Phase 2: Send first_action until Q*bert moves. Capture baseline.
+    def wait_for_level_start(self, first_action=5, max_frames=200):
+        """Wait for new level to start by playing until first reward.
+        Sends first_action until Q*bert gets 25+ reward (cube colored).
+        Then captures baseline from the majority cube value.
         Returns (obs, total_reward, done, info)."""
         total_r = 0
         obs = None
         info = {}
         done = False
-        left_top = False
-        at_top_count = 0
-        # Phase 1: NOOP during celebration (don't risk DOWN during animation)
         for _ in range(max_frames):
-            obs, r, t, tr, info = self.env.step(0)  # NOOP
-            total_r += r
-            if t or tr:
-                done = True
-                break
-            pos = self.read_qbert_position()
-            if pos == (0, 0):
-                if left_top:
-                    at_top_count += 1
-                    if at_top_count >= 3:
-                        break  # Celebration over, Q*bert stable at (0,0)
-            else:
-                left_top = True
-                at_top_count = 0
-        if done:
-            return obs, total_r, done, info
-        # Phase 2: send first_action until Q*bert moves (level started)
-        for _ in range(60):
-            # Snapshot baseline BEFORE each attempt
-            ram = self.env.unwrapped.ale.getRAM()
-            self._cube_start_values = {(r, c): int(ram[addr])
-                                        for (r, c), addr in CUBE_RAM.items()}
             obs, r, t, tr, info = self.env.step(first_action)
             total_r += r
             if t or tr:
                 done = True
                 break
-            pos = self.read_qbert_position()
-            if pos is not None and pos != (0, 0):
-                break  # Move worked — level started
-        # Let Q*bert finish landing
-        if not done:
-            obs, r, done, info = self.wait_for_landing(15)
-            total_r += r
+            # Wait for first reward — means the level has started and a cube was colored
+            if r >= 25:
+                obs2, r2, done2, info = self.wait_for_landing(15)
+                total_r += r2
+                done = done2
+                # Capture baseline from majority value (most cubes at initial color)
+                if not done:
+                    ram = self.env.unwrapped.ale.getRAM()
+                    vals = [int(ram[addr]) for addr in CUBE_RAM.values()]
+                    from collections import Counter
+                    majority = Counter(vals).most_common(1)[0][0]
+                    self._cube_start_values = {(rc): majority
+                                                for rc in CUBE_RAM.keys()}
+                break
+        if not done and self._cube_start_values is None:
+            # Fallback: just use current values
+            obs2, r2, done, info = self.wait_for_landing(15)
+            total_r += r2
+            if not done:
+                ram = self.env.unwrapped.ale.getRAM()
+                self._cube_start_values = {(r, c): int(ram[addr])
+                                            for (r, c), addr in CUBE_RAM.items()}
         return obs, total_r, done, info
 
     def learn_target_color(self, qbert_pos):
