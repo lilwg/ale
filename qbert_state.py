@@ -187,7 +187,7 @@ class QbertStateReader:
         # During celebration, inputs are mostly ignored. Once the level
         # starts, the first DOWN that gives 25 reward = we're playing.
         for i in range(max_frames):
-            action = 1 if i < 40 else first_action  # FIRE first, then DOWN
+            action = 1 if i < 40 else 5  # FIRE first, then DOWN (5=DL)
             obs, r, t, tr, info = self.env.step(action)
             total_r += r
             if t or tr:
