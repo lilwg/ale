@@ -356,19 +356,21 @@ def pick_action(row, col, cube_done, state, discs_available, level=1):
         if on_disc and coily_dist <= 1:
             return DISCS[(row, col)]
 
-        # Wait on disc for Coily to approach — don't leave!
+        # Wait on disc for Coily to approach
         if on_disc and coily_dist <= 4:
-            # Stay near the disc: pick a neighbor that's closest to the disc
-            # This makes Q*bert "hover" near the disc waiting for Coily
+            # Pick neighbor that's undone (productive) and safe
+            # On toggle levels, avoid bouncing through done cubes
             best_wait = None
-            best_wait_dist = 99
+            best_score = -99
             for a, nr, nc in neighbors(row, col):
                 _, _, _, safe = is_move_safe(row, col, a, coily)
                 if safe:
-                    # Prefer moves that keep Q*bert close to the disc
-                    d_to_disc = grid_distance(nr, nc, row, col)
-                    if d_to_disc <= best_wait_dist:
-                        best_wait_dist = d_to_disc
+                    score = 0
+                    if not cube_done[nr][nc]:
+                        score += 10  # prefer undone (won't revert anything)
+                    score += len(neighbors(nr, nc))  # prefer positions with exits
+                    if score > best_score:
+                        best_score = score
                         best_wait = a
             if best_wait is not None:
                 return best_wait
