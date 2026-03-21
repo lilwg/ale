@@ -183,17 +183,19 @@ class QbertStateReader:
         obs = None
         info = {}
         done = False
-        # DL=5, UR=2, DR=3, UL=4
-        # Restart pattern each cycle so first real move is always DL from (0,0)
-        pattern = [5]*5 + [2] + [3,4]*4 + [3]
+        # Send FIRE to acknowledge intro, then DOWN to start playing.
+        # During celebration, inputs are mostly ignored. Once the level
+        # starts, the first DOWN that gives 25 reward = we're playing.
         for i in range(max_frames):
-            action = pattern[i % len(pattern)]
+            action = 1 if i < 40 else first_action  # FIRE first, then DOWN
             obs, r, t, tr, info = self.env.step(action)
             total_r += r
             if t or tr:
                 done = True
                 break
-            if r == 25:
+            # Detect level start: Q*bert at (0,0) after being elsewhere, or got 25 reward
+            pos = self.read_qbert_position()
+            if (r == 25) or (pos == (0, 0) and i > 50):
                 obs2, r2, done2, info = self.wait_for_landing(15)
                 total_r += r2
                 done = done2
